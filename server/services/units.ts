@@ -194,6 +194,10 @@ export function buildUnitWhere(
     clauses.push('u.updated_at < date(?, \'+1 day\')');
     params.push(f.updated_to);
   }
+  if (f.created_from) {
+    clauses.push('u.created_at >= ?');
+    params.push(f.created_from);
+  }
   if (f.has_media === true) clauses.push("EXISTS (SELECT 1 FROM files fi WHERE fi.entity_type = 'unit' AND fi.entity_id = u.id)");
   if (f.has_media === false) clauses.push("NOT EXISTS (SELECT 1 FROM files fi WHERE fi.entity_type = 'unit' AND fi.entity_id = u.id)");
   if (f.mine) {

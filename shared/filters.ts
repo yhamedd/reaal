@@ -24,6 +24,7 @@ export interface UnitFilters {
   verification?: ('current' | 'attention' | 'outdated' | 'never')[];
   updated_from?: string;
   updated_to?: string;
+  created_from?: string;
   has_media?: boolean;
   mine?: boolean;
   include_archived?: boolean;

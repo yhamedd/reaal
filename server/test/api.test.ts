@@ -322,6 +322,64 @@ describe('requirements, matching and offers', () => {
   });
 });
 
+describe('files and media', () => {
+  it('uploads photos and plans, embeds them in the PDF and restricts file access', async () => {
+    const zlib = await import('node:zlib');
+    // Minimal valid 2x2 PNG
+    const png = (() => {
+      const crcTable = Array.from({ length: 256 }, (_, n) => {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        return c >>> 0;
+      });
+      const crc = (buf: Buffer) => {
+        let c = 0xffffffff;
+        for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
+        return (c ^ 0xffffffff) >>> 0;
+      };
+      const chunk = (type: string, data: Buffer) => {
+        const len = Buffer.alloc(4);
+        len.writeUInt32BE(data.length);
+        const td = Buffer.concat([Buffer.from(type), data]);
+        const c = Buffer.alloc(4);
+        c.writeUInt32BE(crc(td));
+        return Buffer.concat([len, td, c]);
+      };
+      const ihdr = Buffer.alloc(13);
+      ihdr.writeUInt32BE(2, 0);
+      ihdr.writeUInt32BE(2, 4);
+      ihdr[8] = 8;
+      ihdr[9] = 2;
+      const raw = Buffer.from([0, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0]);
+      return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+    })();
+    const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12', bua: 350, asking_price: 42e6 });
+    const up = await admin.upload('/api/files').field('entity_type', 'unit').field('entity_id', String(id)).field('category', 'image').attach('files', png, { filename: 'front.png', contentType: 'image/png' });
+    expect(up.status, JSON.stringify(up.body)).toBe(201);
+    const plan = await admin.upload('/api/files').field('entity_type', 'unit').field('entity_id', String(id)).field('category', 'floor_plan').attach('files', png, { filename: 'plan.png', contentType: 'image/png' });
+    expect(plan.status).toBe(201);
+    const bad = await admin.upload('/api/files').field('entity_type', 'unit').field('entity_id', String(id)).attach('files', Buffer.from('#!/bin/sh'), { filename: 'x.sh', contentType: 'application/x-sh' });
+    expect(bad.status).toBe(400);
+    const unit = (await admin.get(`/api/units/${id}`)).body;
+    expect(unit.files.map((f: any) => f.category).sort()).toEqual(['floor_plan', 'image']);
+    const pdf = await admin.raw.post('/api/offers/pdf').set('X-Requested-With', 'reaal').send({ unit_ids: [id] }).buffer(true).parse((r, cb) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(pdf.status).toBe(200);
+    const body = (pdf.body as Buffer).toString('latin1');
+    expect((body.match(/\/Type \/Page\b/g) ?? []).length).toBe(2); // brochure page + floor plan page
+    expect(body).toContain('/Subtype /Image');
+    // Users without inventory access cannot fetch unit files
+    const role = run(ctx.db, "INSERT INTO roles (name, permissions) VALUES ('No inventory', '[]')").lastId;
+    const uid = ctx.addUser('Outsider', 'out@test.local', 'agent');
+    run(ctx.db, 'UPDATE users SET role_id = ? WHERE id = ?', [role, uid]);
+    const outsider = await ctx.login('out@test.local', 'Password123');
+    expect((await outsider.get(`/api/files/${up.body.ids[0]}`)).status).toBe(403);
+  });
+});
+
 describe('notes and mentions', () => {
   it('stores notes and notifies mentioned users', async () => {
     const sarah = ctx.addUser('Sarah Ali', 'sarah@test.local', 'agent');

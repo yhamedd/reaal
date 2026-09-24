@@ -6,11 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
-    "start": "NODE_ENV=production node --disable-warning=ExperimentalWarning dist-server/index.js",
-    "seed": "tsx server/seed-cli.ts",
+    "start": "NODE_ENV=production node --env-file-if-exists=.env --disable-warning=ExperimentalWarning dist-server/server/index.js",
+    "seed": "tsx --env-file-if-exists=.env server/seed-cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run"
   },
@@ -46,5 +46,8 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

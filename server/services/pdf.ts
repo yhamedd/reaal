@@ -63,7 +63,7 @@ export function renderOfferPdf(out: Writable, opts: PdfOptions) {
     const bottom = doc.page.margins.bottom;
     doc.page.margins.bottom = 0; // allow writing inside the bottom margin without triggering a page break
     doc.save();
-    doc.fontSize(8).fillColor('#777777');
+    doc.font('Helvetica').fontSize(8).fillColor('#777777');
     if (contact) doc.text(contact, PAGE_MARGIN, y - 22, { width, align: 'center', lineBreak: false });
     if (settings.pdf.footer_text) doc.text(settings.pdf.footer_text, PAGE_MARGIN, y - 10, { width, align: 'center', lineBreak: false });
     doc.restore();
