@@ -4,6 +4,10 @@ One place for property owners, inventory, buyer requirements, matching and offer
 
 **Owner → Unit → Requirement → Match → Offer**
 
+## Try it in your browser (no install)
+
+On GitHub, open this repository, click **Code → Codespaces → Create codespace on this branch**. It installs everything and loads demo data (takes about 2 minutes). When the terminal shows `Local: http://localhost:5173/`, a browser tab opens with the app; if it doesn't, open the **Ports** tab and click the globe icon next to port 5173. Sign in with `admin@reaal.local` / `ChangeMe123` and choose a new password.
+
 ## Quick start
 
 Requirements: **Node.js 22.13+**. There's no separate database server: the app uses Node's built-in SQLite.

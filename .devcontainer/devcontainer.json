@@ -1,0 +1,11 @@
+{
+  "name": "Reaal",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "npm install && npm run seed",
+  "postAttachCommand": "npm run dev",
+  "forwardPorts": [5173, 3000],
+  "portsAttributes": {
+    "5173": { "label": "Reaal app", "onAutoForward": "openBrowser" },
+    "3000": { "label": "API", "onAutoForward": "silent" }
+  }
+}

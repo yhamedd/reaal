@@ -7,6 +7,8 @@ export default defineConfig({
   build: { outDir: '../dist', emptyOutDir: true },
   server: {
     port: 5173,
+    // Allow GitHub Codespaces' forwarded URLs (*.app.github.dev) to reach the dev server.
+    allowedHosts: ['.app.github.dev'],
     proxy: { '/api': 'http://localhost:3000' },
   },
 });
