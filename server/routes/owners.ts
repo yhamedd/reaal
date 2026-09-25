@@ -14,10 +14,12 @@ export const ownersRouter = Router();
 
 export const OWNER_SPEC: Record<string, FieldSpec> = {
   name: { type: 'text', label: 'Full name', required: true, max: 200 },
+  name_ar: { type: 'text', label: 'Arabic name', max: 200 },
   primary_phone: { type: 'text', label: 'Primary phone', max: 40 },
   secondary_phone: { type: 'text', label: 'Secondary phone', max: 40 },
   whatsapp: { type: 'text', label: 'WhatsApp number', max: 40 },
   email: { type: 'text', label: 'Email', max: 200 },
+  address: { type: 'text', label: 'Address', max: 500 },
   assigned_user_id: { type: 'id', label: 'Assigned agent' },
   source: { type: 'text', label: 'Source', max: 100 },
   status: { type: 'enum', label: 'Status', values: OWNER_STATUSES },
@@ -42,6 +44,7 @@ export function redactOwner<T extends Record<string, any>>(user: AuthUser | unde
     secondary_phone: maskPhone(row.secondary_phone),
     whatsapp: maskPhone(row.whatsapp),
     email: maskEmail(row.email),
+    address: row.address ? '••••' : row.address,
     primary_phone_norm: undefined,
     secondary_phone_norm: undefined,
     whatsapp_norm: undefined,
@@ -88,7 +91,7 @@ export function findOwnerDuplicates(db: DB, data: { name?: string | null; primar
 
 export function insertOwner(db: DB, user: AuthUser, data: Record<string, any>) {
   withNorms(data);
-  const cols = ['name', 'primary_phone', 'primary_phone_norm', 'secondary_phone', 'secondary_phone_norm', 'whatsapp', 'whatsapp_norm', 'email', 'assigned_user_id', 'source', 'status', 'last_contacted'];
+  const cols = ['name', 'name_ar', 'address', 'primary_phone', 'primary_phone_norm', 'secondary_phone', 'secondary_phone_norm', 'whatsapp', 'whatsapp_norm', 'email', 'assigned_user_id', 'source', 'status', 'last_contacted'];
   const values = cols.map((c) => data[c] ?? null);
   if (!data.status) values[cols.indexOf('status')] = 'Active';
   const { lastId } = run(db, `INSERT INTO owners (${cols.join(', ')}, created_by) VALUES (${cols.map(() => '?').join(', ')}, ?)`, [...values, user.id]);
@@ -109,8 +112,8 @@ ownersRouter.get('/', requirePermission('owners.view'), (req, res) => {
   }
   if (q) {
     const like = `%${likeEscape(q)}%`;
-    const parts = ["o.name LIKE ? ESCAPE '\\'", "o.email LIKE ? ESCAPE '\\'"];
-    params.push(like, like);
+    const parts = ["o.name LIKE ? ESCAPE '\\'", "o.name_ar LIKE ? ESCAPE '\\'", "o.email LIKE ? ESCAPE '\\'"];
+    params.push(like, like, like);
     const phone = normalizePhone(q);
     if (phone.length >= 3 && /^[\d\s+()-]+$/.test(q) && can(req.user, 'owners.contact')) {
       parts.push('o.primary_phone_norm LIKE ? OR o.secondary_phone_norm LIKE ? OR o.whatsapp_norm LIKE ?');
@@ -218,7 +221,7 @@ ownersRouter.patch('/:id', requirePermission('owners.edit'), (req, res) => {
   if (!before) throw new HttpError(404, 'Owner not found');
   const data = withNorms(coerce(req.body ?? {}, OWNER_SPEC, true));
   if (!can(req.user, 'owners.contact')) {
-    for (const k of ['primary_phone', 'secondary_phone', 'whatsapp', 'email', 'primary_phone_norm', 'secondary_phone_norm', 'whatsapp_norm']) delete data[k];
+    for (const k of ['primary_phone', 'secondary_phone', 'whatsapp', 'email', 'address', 'primary_phone_norm', 'secondary_phone_norm', 'whatsapp_norm']) delete data[k];
   }
   if (data.status === 'Archived' && !can(req.user, 'owners.delete')) throw new HttpError(403, "You don't have permission to archive owners");
   tx(db, () => {

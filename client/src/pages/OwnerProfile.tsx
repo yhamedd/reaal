@@ -67,6 +67,7 @@ export function OwnerPage() {
               <h1>{owner.name}</h1>
               <StatusBadge status={owner.status} />
             </div>
+            {owner.name_ar && <div dir="rtl" className="text-2" style={{ fontSize: 15, textAlign: 'left' }}>{owner.name_ar}</div>}
             <div className="text-2">
               {owner.unit_count} propert{owner.unit_count === 1 ? 'y' : 'ies'} · {owner.agent_name ? `Agent: ${owner.agent_name}` : 'Unassigned'}
               {owner.last_contacted && ` · Last contacted ${timeAgo(owner.last_contacted)}`}
@@ -149,6 +150,7 @@ export function OwnerPage() {
                 <dt>Secondary phone</dt><dd>{owner.secondary_phone ?? '—'}</dd>
                 <dt>WhatsApp</dt><dd>{owner.whatsapp ?? '—'}</dd>
                 <dt>Email</dt><dd>{owner.email ? (owner.contact_hidden ? owner.email : <a href={`mailto:${owner.email}`}>{owner.email}</a>) : '—'}</dd>
+                <dt>Address</dt><dd>{owner.address ?? '—'}</dd>
               </dl>
             </div>
           </div>

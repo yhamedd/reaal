@@ -161,7 +161,7 @@ describe('inventory', () => {
   it('fills developer from project and canonicalises master values', async () => {
     const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'a-12', property_type: 'VILLA', asking_price: '42M' });
     const u = (await admin.get(`/api/units/${id}`)).body;
-    expect(u.developer).toBe('Emaar');
+    expect(u.developer).toBe('Emaar Misr');
     expect(u.property_type).toBe('Villa');
     expect(u.asking_price).toBe(42_000_000);
   });
@@ -421,7 +421,7 @@ describe('import and export', () => {
     expect(val.body.summary.ignored_columns).toContain('Random Column');
     expect(val.body.summary.new_projects).toContain('New Compound');
     const bad = val.body.rows.find((r: any) => r.row === 5);
-    expect(bad.errors.join(' ')).toMatch(/Invalid phone/);
+    expect(bad.warnings.join(' ')).toMatch(/Invalid phone/); // bad phones are dropped, not fatal
     expect(bad.errors.join(' ')).toMatch(/Invalid number in BUA/);
 
     const done = await admin.post(`/api/imports/${up.body.id}/confirm`, { duplicates: 'skip' });
@@ -431,6 +431,43 @@ describe('import and export', () => {
     expect(mona.n).toBe(1); // both of Mona's rows share one owner
     expect(get<any>(ctx.db, "SELECT property_type FROM units WHERE unit_number = 'C21'").property_type).toBe('Townhouse');
     expect(get(ctx.db, "SELECT 1 FROM projects WHERE name = 'New Compound'")).toBeTruthy();
+  });
+
+  it('imports a developer ownership export (Emaar Marassi layout)', async () => {
+    const file = await xlsx([
+      ['Property Inventory: Property Name', 'Property Inventory: Property Name', 'Location Code', 'Account Name', 'Account Name (arabic)', 'Phone Country Code', 'Phone', 'Mobile Country Code', 'Mobile', 'Address (display)'],
+      ['Marassi', 'Marassi', 'Marassi Arezzo P1 V-V-153', 'Test Owner One', ' / مالك تجريبي', 'Egypt: 0020', '1110000001', 'Egypt: 0020', '1220000001', ' 1 Test St,<br>Alex  Egypt'],
+      ['Marassi', 'Marassi', 'Marassi Marina 2-8G-2-2', 'Test Owner One', ' / مالك تجريبي', 'Egypt: 0020', '1110000001', 'Egypt: 0020', '01220000001', ''],
+      ['Marassi', 'Marassi', 'Marassi Isola P1 TH-TH-28', 'Test Bank', ' /    ', 'Egypt: 0020', 'Egypt: 0020', 'Egypt: 0020', '01000000009', ''],
+      ['Marassi', 'Marassi', 'Marassi The Address Beach-SA-SL-20', 'Gulf Owner', '', 'United Arab Emirates: 00971', '', 'United Arab Emirates: 00971', '501234567', ''],
+    ]);
+    const up = await admin.upload('/api/imports').field('kind', 'inventory').attach('file', file, 'marassi.xlsx');
+    expect(up.body.mapping).toMatchObject({
+      'Property Inventory: Property Name': 'project',
+      'Location Code': 'location_code',
+      'Account Name': 'owner_name',
+      'Account Name (arabic)': 'owner_name_ar',
+      Mobile: 'primary_phone',
+      Phone: 'secondary_phone',
+      'Mobile Country Code': 'mobile_country_code',
+      'Phone Country Code': 'phone_country_code',
+      'Address (display)': 'owner_address',
+    });
+    const val = await admin.post(`/api/imports/${up.body.id}/validate`, { mapping: up.body.mapping, options: { status: 'Off Market' } });
+    expect(val.body.summary).toMatchObject({ total: 4, ready: 4, errors: 0 });
+    const done = await admin.post(`/api/imports/${up.body.id}/confirm`, { duplicates: 'skip' });
+    expect(done.body.result).toMatchObject({ created_units: 4, created_owners: 3 });
+    const units = (await admin.get('/api/units')).body.rows;
+    const villa = units.find((u: any) => u.unit_number === 'V-V-153');
+    expect(villa).toMatchObject({ project: 'Marassi', developer: 'Emaar Misr', phase: 'Arezzo P1', property_type: 'Villa', status: 'Off Market', location: 'North Coast', assigned_user_id: null });
+    expect(units.find((u: any) => u.unit_number === '8G-2-2')).toMatchObject({ phase: 'Marina 2', property_type: 'Chalet', owner_id: villa.owner_id });
+    const owner = (await admin.get(`/api/owners/${villa.owner_id}`)).body;
+    expect(owner).toMatchObject({ name: 'Test Owner One', name_ar: 'مالك تجريبي', primary_phone: '01220000001', secondary_phone: '01110000001', address: '1 Test St, Alex Egypt' });
+    expect(owner.units).toHaveLength(2);
+    const gulf = units.find((u: any) => u.unit_number === 'SA-SL-20');
+    expect(gulf.owner_phone).toBe('+971501234567');
+    // Arabic name is searchable
+    expect((await admin.get(`/api/search?q=${encodeURIComponent('مالك')}`)).body.owners[0].name).toBe('Test Owner One');
   });
 
   it('imports CSV owners and updates duplicates when asked', async () => {
@@ -486,5 +523,17 @@ describe('saved views and settings', () => {
     expect(res.body.verification.attention_days).toBe(7);
     const me = (await admin.get('/api/auth/me')).body;
     expect(me.config.verification).toEqual({ attention: 7, outdated: 21 });
+  });
+});
+
+describe('duplicate detection across phases', () => {
+  it('treats the same unit number in different phases as different units', async () => {
+    const ctx2 = await setup();
+    const a = await ctx2.login('admin@test.local', 'Admin12345');
+    const p = await projectId(ctx2.db, 'Marassi');
+    expect((await a.post('/api/units', { project_id: p, phase: 'Arezzo P1', unit_number: 'V-V-153' })).status).toBe(201);
+    expect((await a.post('/api/units', { project_id: p, phase: 'Verona P1', unit_number: 'V-V-153' })).status).toBe(201);
+    expect((await a.post('/api/units', { project_id: p, phase: 'Arezzo P1', unit_number: 'v-v-153' })).status).toBe(409);
+    expect((await a.post('/api/units', { project_id: p, unit_number: 'V-V-153' })).status).toBe(409); // unknown phase: still warn
   });
 });

@@ -50,7 +50,7 @@ export function AppLayout() {
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, show: true, end: true },
     { to: '/inventory', label: 'Inventory', icon: Building2, show: can('inventory.view') },
     { to: '/owners', label: 'Owners', icon: UsersRound, show: can('owners.view') },
-    { to: '/requirements', label: 'Requirements', icon: ClipboardList, show: can('requirements.view') },
+    { to: '/requests', label: 'Requests', icon: ClipboardList, show: can('requirements.view') },
     { to: '/offers', label: 'Offers', icon: FileText, show: can('offers.create') },
     { to: '/imports', label: 'Imports', icon: FileSpreadsheet, show: can('imports.run') },
     { to: '/team', label: 'Team', icon: Users, show: can('users.manage') },
@@ -125,7 +125,7 @@ function QuickCreateButton() {
   const items = [
     { label: 'Add Owner', show: can('owners.create'), run: () => open('owner') },
     { label: 'Add Unit', show: can('inventory.create'), run: () => open('unit') },
-    { label: 'Add Requirement', show: can('requirements.manage'), run: () => open('requirement') },
+    { label: 'Add Request', show: can('requirements.manage'), run: () => open('requirement') },
     { label: 'Create Offer', show: can('offers.create'), run: () => navigate('/offers/new') },
   ].filter((i) => i.show);
   if (!items.length) return null;

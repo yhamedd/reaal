@@ -6,7 +6,7 @@ One place for property owners, inventory, buyer requirements, matching and offer
 
 ## Try it in your browser (no install)
 
-On GitHub, open this repository, click **Code → Codespaces → Create codespace on this branch**. It installs everything and loads demo data (takes about 2 minutes). When the terminal shows `Local: http://localhost:5173/`, a browser tab opens with the app; if it doesn't, open the **Ports** tab and click the globe icon next to port 5173. Sign in with `admin@reaal.local` / `ChangeMe123` and choose a new password.
+On GitHub, open this repository, click **Code → Codespaces → Create codespace on this branch**. It installs everything (takes about 2 minutes). When the terminal shows `Local: http://localhost:5173/`, a browser tab opens with the app; if it doesn't, open the **Ports** tab and click the globe icon next to port 5173. Sign in with `admin@reaal.local` / `ChangeMe123` and choose a new password.
 
 ## Quick start
 
@@ -15,11 +15,10 @@ Requirements: **Node.js 22.13+**. There's no separate database server: the app u
 ```bash
 npm install
 cp .env.example .env         # optional: set ADMIN_EMAIL / ADMIN_PASSWORD
-npm run seed                 # optional: load ~240 demo units, owners and requirements
 npm run dev                  # API on :3000, web app on http://localhost:5173
 ```
 
-The first start creates a **Super Admin**. If you don't set `ADMIN_PASSWORD`, the login is `admin@reaal.local` / `ChangeMe123` and you must pick a new password on first sign-in. The demo seed also adds team members (`ahmed@`, `youssef@`, `sarah@`, `mariam@reaal.local`), all with password `Password123`.
+The first start creates a **Super Admin**. If you don't set `ADMIN_PASSWORD`, the login is `admin@reaal.local` / `ChangeMe123` and you must pick a new password on first sign-in.
 
 Production:
 
@@ -36,7 +35,7 @@ All data lives in `DATA_DIR` (default `./data`): `reaal.db` plus `uploads/`. Bac
 | `npm run build` / `npm start` | Production build / run |
 | `npm test` | API integration and unit tests (Vitest + Supertest) |
 | `npm run typecheck` | Type-check client and server |
-| `npm run seed [count]` | Demo data, only when inventory is empty |
+| `npm run reset -- --yes` | Delete all local data and start empty (stop the app first) |
 
 ## What's included
 
@@ -65,9 +64,11 @@ All data lives in `DATA_DIR` (default `./data`): `reaal.db` plus `uploads/`. Bac
 - **Validation** flags missing required data, invalid phones and numbers (it understands `42M`, `3.5m`, `42,000,000`), duplicate owners and properties (in the database and within the file), unknown values, new projects and developers, and ignored columns.
 - **Duplicates** can be skipped, used to update existing records, or created anyway.
 
+**Developer ownership exports** (e.g. Emaar Misr's "Property Inventory" sheets) import directly. A *Location code* column such as `Marassi Arezzo P1 V-V-153` is split into project, phase/neighbourhood (`Arezzo P1`) and unit number (`V-V-153`), and the unit type is inferred where the code shows it (V-V → Villa, TH-TH → Townhouse, SA-… → Apartment, building-floor-unit → Chalet). Separate country-code columns are combined with the numbers (`Egypt: 0020` + `1112199940` → `01112199940`, Gulf numbers keep `+971…`), cells with two numbers become primary and secondary phones, Arabic names and addresses are kept, "NULL" placeholders are dropped, and rows sharing a phone number become one owner. On the mapping step you choose defaults for rows that don't say: developer, location and status (owner lists without prices default to *Off Market*).
+
 **Exports** of the entire inventory, filtered inventory, selected rows, owners or requirements, as Excel or CSV. Exports need a permission, are logged with row counts, and are protected against spreadsheet formula injection.
 
-**Requirements & matching**: filters on project/developer, type, price, BUA, bedrooms and *Available* status, and ranks by preferred project, finishing, delivery, budget headroom and freshness. You can remove irrelevant results (and restore them), then select units → **Create Offer**. The requirement's agent is notified when a new matching unit appears.
+**Requests (buyer requirements) & matching**: filters on project/developer, type, price, BUA, bedrooms and *Available* status, and ranks by preferred project, finishing, delivery, budget headroom and freshness. You can remove irrelevant results (and restore them), then select units → **Create Offer**. The requirement's agent is notified when a new matching unit appears.
 
 **Offer creator**: opens from a unit, the inventory, a requirement or the Offers page.
 - **Templates:** WhatsApp, Short, Detailed, PDF and Internal.

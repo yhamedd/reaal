@@ -10,11 +10,28 @@ export const DEFAULT_MASTER: Record<string, string[]> = {
   view: ['Garden', 'Pool', 'Lagoon', 'Sea', 'Landscape', 'Street', 'Club House', 'Golf'],
 };
 
-export const DEFAULT_DEVELOPERS: Record<string, string[]> = {
-  Emaar: ['Mivida', 'Marassi', 'Uptown Cairo', 'Cairo Gate'],
-  SODIC: ['Villette', 'SODIC West', 'Eastown'],
-  'Palm Hills': ['Palm Hills October', 'Palm Hills New Cairo', 'Hacienda Bay'],
-  'Mountain View': ['Mountain View iCity', 'Mountain View Hyde Park'],
+/** Developer → [project, location]. Projects carry a location so inventory can be grouped by area. */
+export const DEFAULT_DEVELOPERS: Record<string, [string, string][]> = {
+  'Emaar Misr': [
+    ['Marassi', 'North Coast'],
+    ['Mivida', 'New Cairo'],
+    ['Uptown Cairo', 'Mokattam'],
+    ['Cairo Gate', 'Sheikh Zayed'],
+  ],
+  SODIC: [
+    ['Villette', 'New Cairo'],
+    ['SODIC West', 'Sheikh Zayed'],
+    ['Eastown', 'New Cairo'],
+  ],
+  'Palm Hills': [
+    ['Palm Hills October', '6th of October'],
+    ['Palm Hills New Cairo', 'New Cairo'],
+    ['Hacienda Bay', 'North Coast'],
+  ],
+  'Mountain View': [
+    ['Mountain View iCity', 'New Cairo'],
+    ['Mountain View Hyde Park', 'New Cairo'],
+  ],
 };
 
 export const DEFAULT_TAGS: [string, string][] = [
@@ -67,7 +84,7 @@ export function bootstrap(db: DB, opts: { adminEmail?: string; adminPassword?: s
       }
       for (const [dev, projects] of Object.entries(DEFAULT_DEVELOPERS)) {
         const { lastId } = run(db, 'INSERT INTO developers (name) VALUES (?)', [dev]);
-        for (const p of projects) run(db, 'INSERT INTO projects (name, developer_id) VALUES (?, ?)', [p, lastId]);
+        for (const [p, location] of projects) run(db, 'INSERT INTO projects (name, developer_id, location) VALUES (?, ?, ?)', [p, lastId, location]);
       }
       for (const [name, color] of DEFAULT_TAGS) run(db, 'INSERT INTO tags (name, color) VALUES (?, ?)', [name, color]);
     }

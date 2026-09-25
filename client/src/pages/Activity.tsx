@@ -11,7 +11,7 @@ const ENTITY_TYPES = [
   { value: '', label: 'All records' },
   { value: 'unit', label: 'Units' },
   { value: 'owner', label: 'Owners' },
-  { value: 'requirement', label: 'Requirements' },
+  { value: 'requirement', label: 'Requests' },
   { value: 'offer', label: 'Offers' },
   { value: 'inventory', label: 'Exports' },
   { value: 'user', label: 'Users' },

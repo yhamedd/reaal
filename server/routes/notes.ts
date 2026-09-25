@@ -18,7 +18,7 @@ function entityInfo(db: import('../db.js').DB, type: string, id: number): { labe
   }
   if (type === 'requirement') {
     const r = get<any>(db, 'SELECT client_name FROM requirements WHERE id = ?', [id]);
-    return r ? { label: `${r.client_name}'s requirement`, link: `/requirements/${id}` } : null;
+    return r ? { label: `${r.client_name}'s request`, link: `/requests/${id}` } : null;
   }
   return null;
 }

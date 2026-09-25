@@ -64,7 +64,7 @@ export function GlobalSearch() {
     return [
       ...results.owners.map((o) => ({ key: `o${o.id}`, href: `/owners/${o.id}` })),
       ...results.units.map((u) => ({ key: `u${u.id}`, href: `/inventory/${u.id}` })),
-      ...results.requirements.map((r) => ({ key: `r${r.id}`, href: `/requirements/${r.id}` })),
+      ...results.requirements.map((r) => ({ key: `r${r.id}`, href: `/requests/${r.id}` })),
       ...(results.units.length ? [{ key: 'all', href: `/inventory?q=${encodeURIComponent(q.trim())}` }] : []),
     ];
   }, [results, q]);
@@ -122,7 +122,7 @@ export function GlobalSearch() {
                 <a key={o.id} className={cls(`o${o.id}`)} onMouseDown={(e) => e.preventDefault()} onClick={() => go(`/owners/${o.id}`)} onMouseEnter={() => setHl(idx(`o${o.id}`))}>
                   <span className="icon-box"><UsersRound size={15} /></span>
                   <div className="grow">
-                    <div className="title">{o.name}</div>
+                    <div className="title">{o.name}{o.name_ar && <span className="muted" style={{ fontWeight: 400 }}> · {o.name_ar}</span>}</div>
                     <div className="meta">
                       {o.primary_phone ? `Phone: ${o.primary_phone} · ` : ''}Properties owned: {o.unit_count}
                     </div>
@@ -157,9 +157,9 @@ export function GlobalSearch() {
           )}
           {results.requirements.length > 0 && (
             <div className="result-group">
-              <div className="menu-label">Requirements</div>
+              <div className="menu-label">Requests</div>
               {results.requirements.map((r) => (
-                <a key={r.id} className={cls(`r${r.id}`)} onMouseDown={(e) => e.preventDefault()} onClick={() => go(`/requirements/${r.id}`)} onMouseEnter={() => setHl(idx(`r${r.id}`))}>
+                <a key={r.id} className={cls(`r${r.id}`)} onMouseDown={(e) => e.preventDefault()} onClick={() => go(`/requests/${r.id}`)} onMouseEnter={() => setHl(idx(`r${r.id}`))}>
                   <span className="icon-box"><ClipboardList size={15} /></span>
                   <div className="grow">
                     <div className="title">{r.client_name}</div>

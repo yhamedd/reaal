@@ -33,7 +33,7 @@ export function entityLink(a: { entity_type: string | null; entity_id: number | 
     case 'owner':
       return `/owners/${a.entity_id}`;
     case 'requirement':
-      return `/requirements/${a.entity_id}`;
+      return `/requests/${a.entity_id}`;
     case 'offer':
       return `/offers/${a.entity_id}`;
     default:

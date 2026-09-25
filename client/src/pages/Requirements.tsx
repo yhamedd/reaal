@@ -40,12 +40,12 @@ export function RequirementsPage() {
     <div className="page wide">
       <div className="page-head">
         <div>
-          <h1>Requirements</h1>
+          <h1>Requests</h1>
           <div className="sub">Buyer requests matched against available inventory.</div>
         </div>
         <div className="row">
-          {can('requirements.export') && <button className="btn" onClick={() => download('/api/export/requirements?format=xlsx').catch((e) => toast(errorMessage(e), 'error'))}><Download size={15} /> Export</button>}
-          {can('requirements.manage') && <button className="btn primary" onClick={() => quick('requirement')}><Plus size={15} /> Add Requirement</button>}
+          {can('requirements.export') && <button className="btn" onClick={() => download('/api/export/requests?format=xlsx').catch((e) => toast(errorMessage(e), 'error'))}><Download size={15} /> Export</button>}
+          {can('requirements.manage') && <button className="btn primary" onClick={() => quick('requirement')}><Plus size={15} /> Add Request</button>}
         </div>
       </div>
       <div className="row wrap" style={{ marginBottom: 12 }}>
@@ -61,7 +61,7 @@ export function RequirementsPage() {
         {!rows ? (
           <Loading />
         ) : rows.length === 0 ? (
-          <Empty title="No requirements">{can('requirements.manage') && <button className="btn sm primary" onClick={() => quick('requirement')}>Add requirement</button>}</Empty>
+          <Empty title="No requests">{can('requirements.manage') && <button className="btn sm primary" onClick={() => quick('requirement')}>Add request</button>}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -70,7 +70,7 @@ export function RequirementsPage() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="clickable" onClick={() => navigate(`/requirements/${r.id}`)}>
+                  <tr key={r.id} className="clickable" onClick={() => navigate(`/requests/${r.id}`)}>
                     <td><strong>{r.client_name}</strong><div className="muted mono" style={{ fontSize: 11 }}>{r.code}</div></td>
                     <td>
                       {[r.property_types.join(' / '), r.preferred_projects.map((p: any) => p.name).join(', ') || r.developer, r.min_bedrooms ? `${r.min_bedrooms}+ BR` : null, r.min_bua ? `${r.min_bua}+ sqm` : null].filter(Boolean).join(' · ') || <span className="muted">Anything</span>}

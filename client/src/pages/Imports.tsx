@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, CheckCircle2, Download, FileSpreadsheet, Upload, XCircle } from 'lucide-react';
 import { api, download } from '../api';
+import { useData } from '../data';
 import { Empty, Loading, Spinner, StatusBadge, dateTime, errorMessage, useConfirm, useToast } from '../ui';
 
 interface Target {
@@ -47,6 +48,8 @@ export function ImportsPage() {
   const [kind, setKind] = useState<'inventory' | 'owners'>('inventory');
   const [imp, setImp] = useState<ImportState | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  const { master } = useData();
+  const [defaults, setDefaults] = useState<{ developer: string; location: string; status: string }>({ developer: '', location: '', status: '' });
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [problems, setProblems] = useState<RowResult[]>([]);
@@ -82,6 +85,9 @@ export function ImportsPage() {
       const r = await api.upload<ImportState>('/api/imports', form);
       setImp(r);
       setMapping(r.mapping);
+      // Ownership lists without prices aren't listings: default them to Off Market.
+      const hasPrice = Object.values(r.mapping).includes('asking_price');
+      setDefaults({ developer: '', location: '', status: hasPrice ? 'Available' : 'Off Market' });
       setStep(1);
     } catch (e) {
       toast(errorMessage(e), 'error');
@@ -95,7 +101,7 @@ export function ImportsPage() {
     if (!imp) return;
     setBusy(true);
     try {
-      const r = await api.post(`/api/imports/${imp.id}/validate`, { mapping });
+      const r = await api.post(`/api/imports/${imp.id}/validate`, { mapping, options: imp.kind === 'inventory' ? defaults : {} });
       setSummary(r.summary);
       setProblems(r.rows);
       setStep(3);
@@ -130,7 +136,7 @@ export function ImportsPage() {
   };
 
   const usedTargets = new Set(Object.values(mapping).filter(Boolean));
-  const missingRequired = imp?.fields.filter((f) => f.required && !usedTargets.has(f.key)) ?? [];
+  const missingRequired = imp?.fields.filter((f) => f.required && !usedTargets.has(f.key) && !(f.key === 'project' && usedTargets.has('location_code'))) ?? [];
   const shownProblems = problems.filter((p) => problemFilter === 'all' || (problemFilter === 'warning' ? p.warnings.length > 0 : p.status === problemFilter));
 
   return (
@@ -210,6 +216,34 @@ export function ImportsPage() {
               <button className="btn primary" disabled={busy || missingRequired.length > 0} onClick={validate}>{busy ? <Spinner /> : <>Validate <ArrowRight size={14} /></>}</button>
             </div>
           </div>
+          {imp.kind === 'inventory' && (
+            <div className="panel-body" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="section-title">Defaults for rows that don’t include them</div>
+              <div className="form-grid">
+                <div className="field">
+                  <label>Developer</label>
+                  <select className="select" value={defaults.developer} onChange={(e) => setDefaults((d) => ({ ...d, developer: e.target.value }))}>
+                    <option value="">From the project (recommended)</option>
+                    {(master?.developers ?? []).filter((d) => d.active).map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Location</label>
+                  <input className="input" list="import-locations" placeholder="From the project, e.g. North Coast" value={defaults.location} onChange={(e) => setDefaults((d) => ({ ...d, location: e.target.value }))} />
+                  <datalist id="import-locations">
+                    {[...new Set((master?.projects ?? []).map((p) => p.location).filter(Boolean))].map((l) => <option key={l!} value={l!} />)}
+                  </datalist>
+                </div>
+                <div className="field">
+                  <label>Status</label>
+                  <select className="select" value={defaults.status} onChange={(e) => setDefaults((d) => ({ ...d, status: e.target.value }))}>
+                    {(master?.statuses.unit ?? []).filter((s) => s !== 'Archived').map((s) => <option key={s}>{s}</option>)}
+                  </select>
+                  <span className="hint">Use “Off Market” for owner lists; switch units to Available when an owner decides to sell.</span>
+                </div>
+              </div>
+            </div>
+          )}
           {missingRequired.length > 0 && <div className="panel-body"><div className="callout warn">Map the required field{missingRequired.length > 1 ? 's' : ''}: {missingRequired.map((f) => f.label).join(', ')}</div></div>}
           <div className="table-wrap">
             <table className="table">

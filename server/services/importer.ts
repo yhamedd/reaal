@@ -8,6 +8,7 @@ import { canonicalValue, ensureDeveloper, ensureProject, findDeveloper, findProj
 import { insertUnit } from '../routes/units.js';
 import { insertOwner } from '../routes/owners.js';
 import { logActivity } from '../activity.js';
+import { cleanAddress, cleanArabicName, cleanPersonName, combinePhone, isPhonePlaceholder, parseLocationCode } from './importParsing.js';
 
 export type ImportKind = 'inventory' | 'owners';
 
@@ -21,17 +22,22 @@ export interface TargetField {
 }
 
 export const TARGET_FIELDS: TargetField[] = [
-  { key: 'owner_name', label: 'Owner name', kinds: ['inventory', 'owners'], type: 'text', synonyms: ['ownername', 'owner', 'clientname', 'client', 'name', 'fullname', 'seller', 'sellername', 'اسمالمالك', 'المالك', 'الاسم'] },
+  { key: 'owner_name', label: 'Owner name', kinds: ['inventory', 'owners'], type: 'text', synonyms: ['ownername', 'owner', 'clientname', 'client', 'name', 'fullname', 'seller', 'sellername', 'accountname', 'customername', 'اسمالمالك', 'المالك', 'الاسم'] },
+  { key: 'owner_name_ar', label: 'Owner name (Arabic)', kinds: ['inventory', 'owners'], type: 'text', synonyms: ['ownernamearabic', 'accountnamearabic', 'namearabic', 'arabicname', 'namear', 'الاسمبالعربي', 'الاسمعربي'] },
   { key: 'primary_phone', label: 'Primary phone', kinds: ['inventory', 'owners'], type: 'phone', synonyms: ['mobile', 'phone', 'primaryphone', 'phone1', 'mobile1', 'tel', 'telephone', 'phonenumber', 'mobilenumber', 'number', 'الموبايل', 'رقمالموبايل', 'التليفون', 'الهاتف'] },
+  { key: 'phone_country_code', label: 'Phone country code', kinds: ['inventory', 'owners'], type: 'text', synonyms: ['phonecountrycode', 'phonecc', 'countrycode'] },
+  { key: 'mobile_country_code', label: 'Mobile country code', kinds: ['inventory', 'owners'], type: 'text', synonyms: ['mobilecountrycode', 'mobilecc'] },
   { key: 'secondary_phone', label: 'Secondary phone', kinds: ['inventory', 'owners'], type: 'phone', synonyms: ['phone2', 'mobile2', 'secondaryphone', 'otherphone', 'altphone', 'alternativephone', 'secondphone'] },
   { key: 'whatsapp', label: 'WhatsApp number', kinds: ['inventory', 'owners'], type: 'phone', synonyms: ['whatsapp', 'whatsappnumber', 'wa', 'واتساب'] },
   { key: 'owner_email', label: 'Owner email', kinds: ['inventory', 'owners'], type: 'email', synonyms: ['email', 'mail', 'emailaddress', 'owneremail'] },
+  { key: 'owner_address', label: 'Owner address', kinds: ['inventory', 'owners'], type: 'text', synonyms: ['address', 'addressdisplay', 'owneraddress', 'mailingaddress', 'العنوان'] },
+  { key: 'location_code', label: 'Location code (project + phase + unit)', kinds: ['inventory'], type: 'text', synonyms: ['locationcode', 'unitlocation', 'propertycode', 'unitfullcode'] },
   { key: 'developer', label: 'Developer', kinds: ['inventory'], type: 'text', synonyms: ['developer', 'dev', 'developername', 'المطور'] },
-  { key: 'project', label: 'Project', kinds: ['inventory'], type: 'text', required: true, synonyms: ['project', 'compound', 'projectname', 'community', 'المشروع', 'الكمبوند'] },
+  { key: 'project', label: 'Project', kinds: ['inventory'], type: 'text', required: true, synonyms: ['project', 'compound', 'projectname', 'community', 'propertyname', 'propertyinventorypropertyname', 'المشروع', 'الكمبوند'] },
   { key: 'phase', label: 'Phase', kinds: ['inventory'], type: 'text', synonyms: ['phase', 'parcel', 'zone', 'cluster', 'المرحلة'] },
   { key: 'unit_number', label: 'Unit number', kinds: ['inventory'], type: 'text', synonyms: ['unit', 'unitno', 'unitnumber', 'unitcode', 'villano', 'villanumber', 'aptno', 'apartmentno', 'رقمالوحدة', 'الوحدة'] },
   { key: 'property_type', label: 'Property type', kinds: ['inventory'], type: 'text', synonyms: ['type', 'propertytype', 'unittype', 'category', 'نوعالوحدة', 'النوع'] },
-  { key: 'bua', label: 'BUA', kinds: ['inventory'], type: 'number', synonyms: ['bua', 'builtup', 'builtuparea', 'area', 'size', 'sqm', 'المساحة'] },
+  { key: 'bua', label: 'BUA', kinds: ['inventory'], type: 'number', synonyms: ['bua', 'builtup', 'builtuparea', 'size', 'sqm', 'المساحة'] },
   { key: 'land_area', label: 'Land area', kinds: ['inventory'], type: 'number', synonyms: ['land', 'landarea', 'plot', 'plotarea', 'الارض', 'مساحةالارض'] },
   { key: 'bedrooms', label: 'Bedrooms', kinds: ['inventory'], type: 'int', synonyms: ['bedrooms', 'beds', 'rooms', 'br', 'bedroom', 'غرف', 'الغرف'] },
   { key: 'bathrooms', label: 'Bathrooms', kinds: ['inventory'], type: 'int', synonyms: ['bathrooms', 'baths', 'bathroom', 'حمامات'] },
@@ -39,7 +45,7 @@ export const TARGET_FIELDS: TargetField[] = [
   { key: 'finishing', label: 'Finishing', kinds: ['inventory'], type: 'text', synonyms: ['finishing', 'finish', 'التشطيب'] },
   { key: 'furnished', label: 'Furnishing', kinds: ['inventory'], type: 'text', synonyms: ['furnished', 'furnishing', 'furniture'] },
   { key: 'view', label: 'View', kinds: ['inventory'], type: 'text', synonyms: ['view', 'الفيو'] },
-  { key: 'location', label: 'Location', kinds: ['inventory'], type: 'text', synonyms: ['location', 'address', 'city', 'الموقع'] },
+  { key: 'location', label: 'Location', kinds: ['inventory'], type: 'text', synonyms: ['location', 'area', 'region', 'city', 'الموقع', 'المنطقة'] },
   { key: 'delivery', label: 'Delivery', kinds: ['inventory'], type: 'text', synonyms: ['delivery', 'deliverydate', 'handover', 'الاستلام', 'التسليم'] },
   { key: 'asking_price', label: 'Asking price', kinds: ['inventory'], type: 'number', synonyms: ['price', 'askingprice', 'asking', 'totalprice', 'sellingprice', 'السعر'] },
   { key: 'original_price', label: 'Original price', kinds: ['inventory'], type: 'number', synonyms: ['originalprice', 'developerprice', 'basicprice', 'original', 'السعرالاصلي'] },
@@ -68,6 +74,16 @@ export function suggestMapping(headers: string[], kind: ImportKind): Record<stri
   const mapping: Record<string, string> = {};
   const used = new Set<string>();
   const fields = fieldsFor(kind);
+  // With both "Phone" and "Mobile" columns, the mobile is the primary number (it's the one on WhatsApp).
+  const normed = headers.map(normHeader);
+  const mobileIdx = normed.findIndex((n) => ['mobile', 'mobilenumber', 'mobile1', 'الموبايل'].includes(n));
+  const phoneIdx = normed.findIndex((n) => ['phone', 'phonenumber', 'tel', 'telephone', 'التليفون', 'الهاتف'].includes(n));
+  if (mobileIdx >= 0 && phoneIdx >= 0) {
+    mapping[headers[mobileIdx]] = 'primary_phone';
+    mapping[headers[phoneIdx]] = 'secondary_phone';
+    used.add('primary_phone');
+    used.add('secondary_phone');
+  }
   // exact synonym matches first, then "contains" matches
   for (const pass of ['exact', 'contains'] as const) {
     for (const h of headers) {
@@ -75,7 +91,7 @@ export function suggestMapping(headers: string[], kind: ImportKind): Record<stri
       const n = normHeader(h);
       if (!n) continue;
       const field = fields.find(
-        (f) => !used.has(f.key) && (pass === 'exact' ? f.synonyms.includes(n) || normHeader(f.label) === n || f.key.replace(/_/g, '') === n : f.synonyms.some((s) => s.length >= 4 && n.includes(s))),
+        (f) => !used.has(f.key) && (pass === 'exact' ? f.synonyms.includes(n) || normHeader(f.label) === n || f.key.replace(/_/g, '') === n : f.synonyms.some((s) => s.length >= 5 && n.includes(s))),
       );
       if (field) {
         mapping[h] = field.key;
@@ -136,20 +152,38 @@ export interface ValidationSummary {
   missing_required: string[];
 }
 
-export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: Record<string, string>[], mapping: Record<string, string>) {
+/** Values applied to rows that don't specify them (chosen on the mapping step). */
+export interface ImportOptions {
+  developer?: string | null;
+  location?: string | null;
+  status?: string | null;
+}
+
+export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: Record<string, string>[], mapping: Record<string, string>, options: ImportOptions = {}) {
   const fields = fieldsFor(kind);
   const fieldByKey = new Map(fields.map((f) => [f.key, f]));
   const inverse = new Map<string, string>(); // target → header
   for (const [h, t] of Object.entries(mapping)) if (t && fieldByKey.has(t) && headers.includes(h)) inverse.set(t, h);
   const ignored = headers.filter((h) => !mapping[h] || !fieldByKey.has(mapping[h]));
-  const missingRequired = fields.filter((f) => f.required && !inverse.has(f.key)).map((f) => f.label);
+  // A location code carries the project, so it satisfies the "Project" requirement.
+  const missingRequired = fields
+    .filter((f) => f.required && !inverse.has(f.key) && !(f.key === 'project' && inverse.has('location_code')))
+    .map((f) => f.label);
+  const projectNames = all<{ name: string }>(db, 'SELECT name FROM projects').map((p) => p.name);
+  // Pair each phone column with its country-code column ("Mobile" ↔ "Mobile Country Code").
+  const ccFor = (key: string) => {
+    const header = normHeader(inverse.get(key) ?? '');
+    const pref = header.includes('mobile') ? ['mobile_country_code', 'phone_country_code'] : ['phone_country_code', 'mobile_country_code'];
+    return pref.find((k) => inverse.has(k));
+  };
+  const status = options.status ? UNIT_STATUSES.find((s) => s.toLowerCase() === String(options.status).toLowerCase()) : undefined;
 
   const users = all<{ id: number; name: string; email: string }>(db, "SELECT id, name, email FROM users WHERE status = 'active'");
   const tagNames = new Map(all<{ id: number; name: string }>(db, 'SELECT id, name FROM tags').map((t) => [t.name.toLowerCase(), t.id]));
   const newProjects = new Set<string>();
   const newDevelopers = new Set<string>();
   const seenUnits = new Map<string, number>();
-  const seenOwnerPhones = new Map<string, number>();
+  const seenOwnerPhones = new Map<string, { key: string; row: number }>();
   const results: RowResult[] = [];
 
   rows.forEach((raw, idx) => {
@@ -174,10 +208,16 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
           else r.data[f.key] = f.type === 'int' ? Math.round(n) : n;
           break;
         }
-        case 'phone':
-          if (!isValidPhone(v)) r.errors.push(`Invalid phone number in ${f.label}: “${v}”`);
-          else r.data[f.key] = v;
+        case 'phone': {
+          const ccKey = ccFor(f.key);
+          const { phone, extra } = combinePhone(ccKey ? val(ccKey) : null, v);
+          // A bad number is dropped with a warning; the owner and unit still import.
+          if (!phone || !isValidPhone(phone)) {
+            if (/\d{3,}/.test(v) && !isPhonePlaceholder(v)) r.warnings.push(`Invalid phone number in ${f.label}: “${v}” – skipped`);
+          } else r.data[f.key] = phone;
+          if (extra) r.data.__extra_phone = extra;
           break;
+        }
         case 'email':
           if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) r.warnings.push(`Email “${v}” looks invalid and was skipped`);
           else r.data[f.key] = v.toLowerCase();
@@ -189,8 +229,48 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
           break;
         }
         default:
-          r.data[f.key] = v;
+          if (f.key === 'owner_name') {
+            const n = cleanPersonName(v);
+            if (n) r.data[f.key] = n;
+          } else if (f.key === 'owner_name_ar') {
+            const ar = cleanArabicName(v);
+            if (ar) r.data[f.key] = ar;
+          } else if (f.key === 'owner_address') {
+            const a = cleanAddress(v);
+            if (a) r.data[f.key] = a;
+          } else if (f.key !== 'phone_country_code' && f.key !== 'mobile_country_code') {
+            r.data[f.key] = v;
+          }
       }
+    }
+    if (r.data.__extra_phone) {
+      if (!r.data.secondary_phone && r.data.__extra_phone !== r.data.primary_phone) r.data.secondary_phone = r.data.__extra_phone;
+      delete r.data.__extra_phone;
+    }
+    if (r.data.secondary_phone && normalizePhone(r.data.secondary_phone) === normalizePhone(r.data.primary_phone)) delete r.data.secondary_phone;
+    if (!r.data.primary_phone && r.data.secondary_phone) {
+      r.data.primary_phone = r.data.secondary_phone;
+      delete r.data.secondary_phone;
+    }
+
+    // Location code → project, phase, unit number and (when recognisable) property type
+    if (r.data.location_code) {
+      const parsed = parseLocationCode(String(r.data.location_code), projectNames, r.data.project);
+      if (!parsed) r.warnings.push(`Could not read location code “${r.data.location_code}”`);
+      else {
+        if (!r.data.project && parsed.project) r.data.project = parsed.project;
+        if (!r.data.project) r.errors.push(`Location code “${r.data.location_code}” doesn't start with a known project`);
+        if (!r.data.phase && parsed.phase) r.data.phase = parsed.phase;
+        if (!r.data.unit_number) r.data.unit_number = parsed.unit_number;
+        if (!r.data.property_type && parsed.property_type) r.data.property_type = parsed.property_type;
+      }
+      delete r.data.location_code;
+      if (r.data.project) r.errors = r.errors.filter((e) => e !== 'Missing Project');
+    }
+    if (kind === 'inventory') {
+      if (!r.data.developer && options.developer) r.data.developer = options.developer;
+      if (!r.data.location && options.location) r.data.location = options.location;
+      if (!r.data.status && status) r.data.status = status;
     }
 
     // Status
@@ -259,13 +339,15 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
           r.warnings.push(`Phone belongs to existing owner “${existing.name}” – unit will be linked to them`);
         }
       } else {
-        const firstRow = seenOwnerPhones.get(phones[0]);
-        if (firstRow && kind === 'owners') {
+        // Rows sharing any phone number belong to the same (new) owner.
+        const seen = phones.map((p) => seenOwnerPhones.get(p)).find(Boolean);
+        if (seen && kind === 'owners') {
           r.status = 'duplicate';
-          r.warnings.push(`Same phone as row ${firstRow}`);
+          r.warnings.push(`Same phone as row ${seen.row}`);
         }
-        if (!firstRow) seenOwnerPhones.set(phones[0], r.row);
-        r.owner_key = phones[0];
+        const key = seen?.key ?? phones[0];
+        for (const p of phones) if (!seenOwnerPhones.has(p)) seenOwnerPhones.set(p, { key, row: r.row });
+        r.owner_key = key;
       }
     } else if (r.data.owner_name) {
       const byName = get<any>(db, 'SELECT id, name FROM owners WHERE TRIM(name) = ? COLLATE NOCASE LIMIT 1', [String(r.data.owner_name).trim()]);
@@ -303,9 +385,16 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
       const unitNo = normalizeUnitNumber(r.data.unit_number);
       if (!unitNo) r.warnings.push('No unit number – duplicates cannot be detected');
       if (unitNo && r.data.project) {
-        const key = `${String(r.data.project).toLowerCase()}|${unitNo}`;
+        // Same unit number in different phases is a different unit (Marassi reuses V-V-153 across neighbourhoods).
+        const phase = String(r.data.phase ?? '').trim().toLowerCase();
+        const key = `${String(r.data.project).toLowerCase()}|${phase}|${unitNo}`;
         if (project) {
-          const dup = get<any>(db, 'SELECT id FROM units WHERE project_id = ? AND unit_number_norm = ? AND archived_at IS NULL LIMIT 1', [project.id, unitNo]);
+          const dup = get<any>(
+            db,
+            `SELECT id FROM units WHERE project_id = ? AND unit_number_norm = ? AND archived_at IS NULL
+               AND (? = '' OR phase IS NULL OR TRIM(phase) = '' OR LOWER(TRIM(phase)) = ?) LIMIT 1`,
+            [project.id, unitNo, phase, phase],
+          );
           if (dup) {
             r.duplicate_unit_id = dup.id;
             r.status = 'duplicate';
@@ -357,6 +446,10 @@ export function executeImport(db: DB, user: AuthUser, importId: number, kind: Im
     const resolveOwner = (r: RowResult): number | null => {
       if (r.owner_match_id) {
         counts.linked_owners++;
+        // Fill in details the existing owner record is missing, never overwrite.
+        if (r.data.owner_name_ar || r.data.owner_address) {
+          run(db, 'UPDATE owners SET name_ar = COALESCE(name_ar, ?), address = COALESCE(address, ?) WHERE id = ?', [r.data.owner_name_ar ?? null, r.data.owner_address ?? null, r.owner_match_id]);
+        }
         return r.owner_match_id;
       }
       if (!r.data.owner_name && !r.data.primary_phone) return null;
@@ -367,6 +460,8 @@ export function executeImport(db: DB, user: AuthUser, importId: number, kind: Im
         secondary_phone: r.data.secondary_phone ?? null,
         whatsapp: r.data.whatsapp ?? null,
         email: r.data.owner_email ?? null,
+        name_ar: r.data.owner_name_ar ?? null,
+        address: r.data.owner_address ?? null,
         source: r.data.source ?? 'Import',
         assigned_user_id: r.data.assigned_user_id ?? null,
         status: kind === 'owners' ? r.data.status ?? 'Active' : 'Active',
@@ -413,6 +508,8 @@ export function executeImport(db: DB, user: AuthUser, importId: number, kind: Im
           secondary_phone: r.data.secondary_phone ?? null,
           whatsapp: r.data.whatsapp ?? null,
           email: r.data.owner_email ?? null,
+          name_ar: r.data.owner_name_ar ?? null,
+          address: r.data.owner_address ?? null,
           source: r.data.source ?? 'Import',
           assigned_user_id: r.data.assigned_user_id ?? null,
           status: r.data.status ?? 'Active',
@@ -432,6 +529,9 @@ export function executeImport(db: DB, user: AuthUser, importId: number, kind: Im
       unitData.developer_id = project?.developer_id ?? developerId;
       if (ownerId) unitData.owner_id = ownerId;
       if (!unitData.source) unitData.source = 'Import';
+      // Imported units stay unassigned unless the sheet names an agent; assign them in bulk later.
+      if (unitData.assigned_user_id === undefined) unitData.assigned_user_id = null;
+      if (!unitData.location && project) unitData.location = get<{ location: string | null }>(db, 'SELECT location FROM projects WHERE id = ?', [project.id])?.location ?? null;
 
       if (r.status === 'duplicate' && policy === 'update' && r.duplicate_unit_id) {
         const keys = Object.keys(unitData).filter((k) => unitData[k] !== null && unitData[k] !== undefined && k !== 'source');

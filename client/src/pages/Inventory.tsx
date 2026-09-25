@@ -34,6 +34,8 @@ export interface UnitRow {
   furnished: string | null;
   view: string | null;
   location: string | null;
+  project_location: string | null;
+  owner_name_ar: string | null;
   delivery: string | null;
   asking_price: number | null;
   original_price: number | null;
@@ -52,9 +54,9 @@ export interface UnitRow {
   image_count: number;
 }
 
-const DEFAULT_COLUMNS = ['code', 'owner_name', 'owner_phone', 'developer', 'project', 'phase', 'unit_number', 'property_type', 'bua', 'land_area', 'bedrooms', 'bathrooms', 'finishing', 'delivery', 'asking_price', 'original_price', 'status', 'agent_name', 'last_verified', 'updated_at'];
-const OPTIONAL_COLUMNS = ['floors', 'furnished', 'view', 'location', 'paid_amount', 'remaining_amount', 'maintenance', 'source', 'tags', 'created_at'];
-const STORAGE_KEY = 'reaal.inventory.columns.v1';
+const DEFAULT_COLUMNS = ['code', 'location', 'developer', 'project', 'phase', 'unit_number', 'property_type', 'owner_name', 'owner_phone', 'bua', 'land_area', 'bedrooms', 'bathrooms', 'finishing', 'delivery', 'asking_price', 'original_price', 'status', 'agent_name', 'last_verified', 'updated_at'];
+const OPTIONAL_COLUMNS = ['floors', 'furnished', 'view', 'paid_amount', 'remaining_amount', 'maintenance', 'source', 'tags', 'created_at'];
+const STORAGE_KEY = 'reaal.inventory.columns.v2';
 
 function defaultColumnState(): ColumnState[] {
   return [
@@ -164,7 +166,7 @@ export function InventoryPage() {
     const id = ++seq.current;
     setLoading(true);
     try {
-      const r = await api.get<{ total: number; rows: UnitRow[] }>(`/api/units${qs({ filters: effectiveFilters, sort, limit: 5000 })}`);
+      const r = await api.get<{ total: number; rows: UnitRow[] }>(`/api/units${qs({ filters: effectiveFilters, sort, limit: 20000 })}`);
       if (id !== seq.current) return;
       setRows(r.rows);
       setTotal(r.total);
@@ -213,7 +215,7 @@ export function InventoryPage() {
     const selectEdit = (field: string, label: string, options: () => { value: string | number; label: string }[], getter: (r: UnitRow) => string, required = false) => ({ type: 'select' as const, get: getter, options, toPatch: optionPatch(field, label, options, required) });
     return [
       { key: 'code', label: 'Unit ID', width: 96, text: (r) => r.code, render: (r) => <Link to={`/inventory/${r.id}`} className="mono">{r.code}</Link>, filterable: false },
-      { key: 'owner_name', label: 'Owner', width: 160, text: text('owner_name'), render: (r) => (r.owner_id ? <Link to={`/owners/${r.owner_id}`}>{r.owner_name}</Link> : <span className="muted">—</span>) },
+      { key: 'owner_name', label: 'Owner', width: 160, text: text('owner_name'), render: (r) => (r.owner_id ? <Link to={`/owners/${r.owner_id}`} title={r.owner_name_ar ?? undefined}>{r.owner_name}</Link> : <span className="muted">—</span>) },
       { key: 'owner_phone', label: 'Phone', width: 120, text: text('owner_phone'), sortable: true },
       { key: 'developer', label: 'Developer', width: 120, text: text('developer'), edit: selectEdit('developer_id', 'Developer', developerOptions, (r) => (r.developer_id ? String(r.developer_id) : '')), filterable: true },
       { key: 'project', label: 'Project', width: 140, text: text('project'), edit: selectEdit('project_id', 'Project', projectOptions, (r) => (r.project_id ? String(r.project_id) : '')), filterable: true },
@@ -228,7 +230,7 @@ export function InventoryPage() {
       { key: 'finishing', label: 'Finishing', width: 120, text: text('finishing'), edit: selectEdit('finishing', 'Finishing', valueOptions('finishing'), (r) => r.finishing ?? ''), filterable: true },
       { key: 'furnished', label: 'Furnishing', width: 110, text: text('furnished'), edit: selectEdit('furnished', 'Furnishing', furnishingOptions, (r) => r.furnished ?? '') },
       { key: 'view', label: 'View', width: 100, text: text('view'), edit: selectEdit('view', 'View', valueOptions('view'), (r) => r.view ?? '') },
-      { key: 'location', label: 'Location', width: 140, text: text('location'), edit: textEdit('location', 'Location', 300) },
+      { key: 'location', label: 'Location', width: 120, text: (r) => r.location ?? r.project_location ?? '', render: (r) => (r.location ? r.location : <span className="muted" title="From the project">{r.project_location ?? ''}</span>), edit: textEdit('location', 'Location', 300) },
       { key: 'delivery', label: 'Delivery', width: 96, text: text('delivery'), edit: textEdit('delivery', 'Delivery'), filterable: true },
       { key: 'asking_price', label: 'Asking Price', width: 118, align: 'right', text: num('asking_price'), edit: numEdit('asking_price', 'Asking price'), filterable: true },
       { key: 'original_price', label: 'Original Price', width: 118, align: 'right', text: num('original_price'), edit: numEdit('original_price', 'Original price') },

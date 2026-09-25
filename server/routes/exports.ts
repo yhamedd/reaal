@@ -146,7 +146,7 @@ exportsRouter.get('/requirements', requirePermission('requirements.view', 'requi
     types: (JSON.parse(r.property_types || '[]') as string[]).join(', '),
   }));
   const columns: ExportColumn[] = [
-    { key: 'code', header: 'Requirement ID' },
+    { key: 'code', header: 'Request ID' },
     { key: 'client_name', header: 'Client Name', width: 22 },
     { key: 'phone', header: 'Phone', width: 16 },
     { key: 'whatsapp', header: 'WhatsApp', width: 16 },
@@ -165,8 +165,8 @@ exportsRouter.get('/requirements', requirePermission('requirements.view', 'requi
     { key: 'status', header: 'Status' },
     { key: 'created_at', header: 'Created', width: 18 },
   ];
-  logExport(req, 'requirement', rows.length, 'requirements', format);
-  await send(res, format, 'requirements', columns, rows);
+  logExport(req, 'request', rows.length, 'requests', format);
+  await send(res, format, 'requests', columns, rows);
 });
 
 exportsRouter.use((_req, _res, next) => next(new HttpError(404, 'Unknown export')));

@@ -75,7 +75,7 @@ export function RequirementForm({ requirement, onSaved, onCancel }: { requiremen
         id = (await api.post('/api/requirements', body)).id;
         if (note.trim()) await api.post('/api/notes', { entity_type: 'requirement', entity_id: id, content: note });
       }
-      toast(r ? 'Requirement updated' : 'Requirement added');
+      toast(r ? 'Request updated' : 'Request added');
       onSaved(id);
     } catch (err) {
       if (err instanceof ApiError) setErrors(err.fields);
@@ -166,7 +166,7 @@ export function RequirementForm({ requirement, onSaved, onCancel }: { requiremen
       </section>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button type="button" className="btn" onClick={onCancel}>Cancel</button>
-        <button className="btn primary" disabled={saving}>{saving ? 'Saving…' : r ? 'Save changes' : 'Add requirement'}</button>
+        <button className="btn primary" disabled={saving}>{saving ? 'Saving…' : r ? 'Save changes' : 'Add request'}</button>
       </div>
     </form>
   );

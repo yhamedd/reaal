@@ -8,6 +8,8 @@ import { AgentSelect, DuplicateDialog, TagPicker, ValueSelect, type DuplicateInf
 
 export interface OwnerDraft {
   name: string;
+  name_ar: string;
+  address: string;
   primary_phone: string;
   secondary_phone: string;
   whatsapp: string;
@@ -20,7 +22,7 @@ export interface OwnerDraft {
 }
 
 export function emptyOwner(userId: number | null): OwnerDraft {
-  return { name: '', primary_phone: '', secondary_phone: '', whatsapp: '', email: '', assigned_user_id: userId, source: '', status: 'Active', tag_ids: [], note: '' };
+  return { name: '', name_ar: '', address: '', primary_phone: '', secondary_phone: '', whatsapp: '', email: '', assigned_user_id: userId, source: '', status: 'Active', tag_ids: [], note: '' };
 }
 
 export function OwnerForm({ owner, onSaved, onCancel }: { owner?: any; onSaved: (id: number) => void; onCancel: () => void }) {
@@ -29,7 +31,7 @@ export function OwnerForm({ owner, onSaved, onCancel }: { owner?: any; onSaved: 
   const toast = useToast();
   const [d, setD] = useState<OwnerDraft>(() =>
     owner
-      ? { name: owner.name ?? '', primary_phone: owner.primary_phone ?? '', secondary_phone: owner.secondary_phone ?? '', whatsapp: owner.whatsapp ?? '', email: owner.email ?? '', assigned_user_id: owner.assigned_user_id, source: owner.source ?? '', status: owner.status, tag_ids: (owner.tags ?? []).map((t: any) => t.id), note: '' }
+      ? { name: owner.name ?? '', name_ar: owner.name_ar ?? '', address: owner.contact_hidden ? '' : owner.address ?? '', primary_phone: owner.primary_phone ?? '', secondary_phone: owner.secondary_phone ?? '', whatsapp: owner.whatsapp ?? '', email: owner.email ?? '', assigned_user_id: owner.assigned_user_id, source: owner.source ?? '', status: owner.status, tag_ids: (owner.tags ?? []).map((t: any) => t.id), note: '' }
       : emptyOwner(me!.id),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -55,13 +57,14 @@ export function OwnerForm({ owner, onSaved, onCancel }: { owner?: any; onSaved: 
     setErrors({});
     const body: Record<string, unknown> = {
       name: d.name,
+      name_ar: d.name_ar,
       assigned_user_id: d.assigned_user_id,
       source: d.source,
       status: d.status,
       tag_ids: d.tag_ids,
       confirm_duplicate: confirmDuplicate,
     };
-    if (!contactHidden) Object.assign(body, { primary_phone: d.primary_phone, secondary_phone: d.secondary_phone, whatsapp: d.whatsapp, email: d.email });
+    if (!contactHidden) Object.assign(body, { primary_phone: d.primary_phone, secondary_phone: d.secondary_phone, whatsapp: d.whatsapp, email: d.email, address: d.address });
     try {
       let id: number;
       if (owner) {
@@ -90,6 +93,9 @@ export function OwnerForm({ owner, onSaved, onCancel }: { owner?: any; onSaved: 
         <Field label="Full name" required error={errors.name} className="span-2">
           <input className={`input ${errors.name ? 'invalid' : ''}`} autoFocus value={d.name} onChange={(e) => set('name', e.target.value)} onBlur={checkDuplicates} />
         </Field>
+        <Field label="Arabic name" className="span-2">
+          <input className="input" dir="rtl" value={d.name_ar} onChange={(e) => set('name_ar', e.target.value)} />
+        </Field>
         {!contactHidden && (
           <>
             <Field label="Primary phone" error={errors.primary_phone}>
@@ -103,6 +109,9 @@ export function OwnerForm({ owner, onSaved, onCancel }: { owner?: any; onSaved: 
             </Field>
             <Field label="Email" error={errors.email}>
               <input className="input" type="email" value={d.email} onChange={(e) => set('email', e.target.value)} onBlur={checkDuplicates} />
+            </Field>
+            <Field label="Address" className="span-all">
+              <input className="input" value={d.address} onChange={(e) => set('address', e.target.value)} />
             </Field>
           </>
         )}

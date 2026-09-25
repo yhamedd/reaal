@@ -4,6 +4,7 @@ import { HttpError, can, requirePermission, type AuthUser } from '../auth.js';
 import { coerce, getTags, idList, intParam, maskEmail, maskPhone, normalizeUnitNumber, setTags } from '../util.js';
 import { logActivity, logChanges, notify, notifyPermission, unitCode, unitLabel } from '../activity.js';
 import {
+  DEFAULT_UNIT_ORDER,
   UNIT_LOG_FIELDS,
   UNIT_SELECT,
   UNIT_SORTS,
@@ -56,7 +57,7 @@ export function queryUnits(db: DB, user: AuthUser, rawFilters: unknown, rawSort:
     params,
   )!.n;
   const p = Array.isArray(params) ? params : [];
-  const rows = all<any>(db, `${UNIT_SELECT} ${where} ${orderBy(parseSort(rawSort), UNIT_SORTS, 'u.updated_at DESC, u.id DESC')} LIMIT ? OFFSET ?`, [...p, limit, offset]);
+  const rows = all<any>(db, `${UNIT_SELECT} ${where} ${orderBy(parseSort(rawSort), UNIT_SORTS, DEFAULT_UNIT_ORDER)} LIMIT ? OFFSET ?`, [...p, limit, offset]);
   const tags = getTags(db, 'unit', rows.map((r) => r.id));
   return { total, rows: rows.map((r) => presentUnit(user, r, tags.get(r.id) ?? [])) };
 }
@@ -139,7 +140,7 @@ function applyUnitPatch(db: DB, user: AuthUser, id: number, patch: Record<string
 }
 
 unitsRouter.get('/', requirePermission('inventory.view'), (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 5000, 20000);
+  const limit = Math.min(Number(req.query.limit) || 20000, 50000);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   res.json(queryUnits(req.db, req.user!, req.query.filters, req.query.sort, limit, offset));
 });

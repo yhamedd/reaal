@@ -142,7 +142,7 @@ export function notifyNewMatches(db: DB, unitId: number, actorId: number) {
     run(db, 'INSERT OR IGNORE INTO requirement_match_seen (requirement_id, unit_id) VALUES (?, ?)', [r.id, unitId]);
     const target = r.assigned_user_id;
     if (target && target !== actorId) {
-      notify(db, target, 'match', `New match for ${r.client_name} (${requirementCode(r.id)}): ${label}`, `/requirements/${r.id}`);
+      notify(db, target, 'match', `New match for ${r.client_name} (${requirementCode(r.id)}): ${label}`, `/requests/${r.id}`);
     }
     n++;
   }

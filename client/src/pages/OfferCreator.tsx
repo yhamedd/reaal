@@ -161,7 +161,7 @@ export function OfferCreatorPage() {
         <div>
           <h1>Create offer</h1>
           <div className="sub">
-            {requirement ? <>For <Link to={`/requirements/${requirement.id}`}>{requirement.client_name}</Link>’s requirement · </> : null}
+            {requirement ? <>For <Link to={`/requests/${requirement.id}`}>{requirement.client_name}</Link>’s request · </> : null}
             Editing the text never changes the property database.
           </div>
         </div>
@@ -240,7 +240,7 @@ export function OfferCreatorPage() {
           </div>
           <div className="panel-body stack">
             {!unitIds.length ? (
-              <Empty title="Add at least one property">Search inventory on the left, or select units in Inventory or a requirement’s matches and choose Create Offer.</Empty>
+              <Empty title="Add at least one property">Search inventory on the left, or select units in Inventory or a request’s matches and choose Create Offer.</Empty>
             ) : (
               <textarea className="textarea offer-text" value={text} onChange={(e) => { setText(e.target.value); setEdited(true); }} spellCheck />
             )}

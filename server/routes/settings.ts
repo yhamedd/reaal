@@ -306,8 +306,8 @@ templatesRouter.post('/:key/reset', requirePermission('templates.manage'), (req,
 templatesRouter.post('/preview', requirePermission('templates.manage'), (req, res) => {
   const t = req.body as TemplateDef;
   const sample = [
-    { id: 12, developer: 'Emaar', project: 'Mivida', phase: 'Parcel 5', unit_number: 'A12', property_type: 'Standalone Villa', bua: 350, land_area: 500, bedrooms: 4, bathrooms: 4, finishing: 'Fully Finished', delivery: 'Ready to move', asking_price: 42_000_000, original_price: 30_000_000, paid_amount: 18_000_000, remaining_amount: 12_000_000, status: 'Available', owner_name: 'Ahmed Mohamed', owner_phone: '01012345678' },
-    { id: 21, developer: 'Emaar', project: 'Mivida', phase: 'Parcel 7', unit_number: 'C21', property_type: 'Townhouse', bua: 260, land_area: 300, bedrooms: 3, bathrooms: 3, finishing: 'Semi Finished', delivery: '2027', asking_price: 31_500_000, status: 'Available', owner_name: 'Mona Adel', owner_phone: '01122334455' },
+    { id: 12, developer: 'Emaar Misr', project: 'Mivida', phase: 'Parcel 5', unit_number: 'A12', property_type: 'Standalone Villa', bua: 350, land_area: 500, bedrooms: 4, bathrooms: 4, finishing: 'Fully Finished', delivery: 'Ready to move', asking_price: 42_000_000, original_price: 30_000_000, paid_amount: 18_000_000, remaining_amount: 12_000_000, status: 'Available', owner_name: 'Ahmed Mohamed', owner_phone: '01012345678' },
+    { id: 21, developer: 'Emaar Misr', project: 'Mivida', phase: 'Parcel 7', unit_number: 'C21', property_type: 'Townhouse', bua: 260, land_area: 300, bedrooms: 3, bathrooms: 3, finishing: 'Semi Finished', delivery: '2027', asking_price: 31_500_000, status: 'Available', owner_name: 'Mona Adel', owner_phone: '01122334455' },
   ];
   const s = getSettings(req.db);
   const content = renderOffer({

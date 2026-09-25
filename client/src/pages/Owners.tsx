@@ -63,7 +63,7 @@ export function OwnersPage() {
       <div className="row wrap" style={{ marginBottom: 12 }}>
         <div className="input-affix" style={{ flex: '1 1 260px', maxWidth: 380 }}>
           <Search size={15} />
-          <input className="input" autoFocus placeholder="Search by name, phone or email…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input" autoFocus placeholder="Search by name (English or Arabic), phone or email…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div style={{ width: 170 }}><MultiSelect options={(master?.statuses.owner ?? []).map((s) => ({ value: s, label: s }))} value={status} onChange={setStatus} placeholder="Any status" /></div>
         <div style={{ width: 170 }}><MultiSelect options={users.map((u) => ({ value: u.id, label: u.name }))} value={agents} onChange={setAgents} placeholder="Any agent" /></div>
@@ -95,7 +95,7 @@ export function OwnersPage() {
                 {data.rows.map((o) => (
                   <tr key={o.id} className="clickable" onClick={() => navigate(`/owners/${o.id}`)}>
                     <td className="mono muted">{o.code}</td>
-                    <td><strong>{o.name}</strong></td>
+                    <td><strong>{o.name}</strong>{o.name_ar && <div className="muted" dir="rtl" style={{ fontSize: 12, textAlign: 'left' }}>{o.name_ar}</div>}</td>
                     <td className="nowrap">{o.primary_phone}</td>
                     <td className="desktop-only muted">{o.email}</td>
                     <td className="right num">{o.unit_count}</td>

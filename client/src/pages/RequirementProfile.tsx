@@ -60,9 +60,9 @@ export function RequirementPage() {
     }
   };
   const archive = async () => {
-    if (!(await confirm({ title: 'Archive requirement?', confirmLabel: 'Archive', danger: true }))) return;
+    if (!(await confirm({ title: 'Archive request?', confirmLabel: 'Archive', danger: true }))) return;
     await api.post(`/api/requirements/${r.id}/archive`);
-    navigate('/requirements');
+    navigate('/requests');
   };
 
   const active = (matches ?? []).filter((m) => !m.excluded);
@@ -79,7 +79,7 @@ export function RequirementPage() {
 
   return (
     <div className="page">
-      <div className="breadcrumb"><Link to="/requirements">Requirements</Link> <ChevronRight size={12} /> <span className="mono">{r.code}</span></div>
+      <div className="breadcrumb"><Link to="/requests">Requests</Link> <ChevronRight size={12} /> <span className="mono">{r.code}</span></div>
       <div className="profile-head">
         <div className="stack tight">
           <div className="row wrap">
@@ -198,7 +198,7 @@ export function RequirementPage() {
         </div>
         <div className="stack">
           <div className="panel">
-            <div className="panel-head"><h2>Requirement</h2></div>
+            <div className="panel-head"><h2>Request</h2></div>
             <div className="panel-body">
               <dl className="dl" style={{ margin: 0 }}>
                 <dt>Phone</dt><dd>{r.phone ?? '—'}</dd>
@@ -221,7 +221,7 @@ export function RequirementPage() {
         </div>
       </div>
       {editing && (
-        <Drawer title={`Edit requirement`} onClose={() => setEditing(false)} wide>
+        <Drawer title={`Edit request`} onClose={() => setEditing(false)} wide>
           <RequirementForm requirement={r} onSaved={() => { setEditing(false); load(); loadMatches(); setTick((t) => t + 1); }} onCancel={() => setEditing(false)} />
         </Drawer>
       )}

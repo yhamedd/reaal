@@ -1,7 +1,7 @@
 {
   "name": "Reaal",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
-  "postCreateCommand": "npm install && npm run seed",
+  "postCreateCommand": "npm install",
   "postAttachCommand": "npm run dev",
   "forwardPorts": [5173, 3000],
   "portsAttributes": {

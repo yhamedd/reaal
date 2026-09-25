@@ -88,7 +88,7 @@ export function OfferDetailPage() {
           <div className="text-2">
             {TEMPLATE_LABELS[offer.template] ?? offer.template} · {offer.created_by_name} · {dateTime(offer.created_at)}
             {offer.client_name && <> · for <strong>{offer.client_name}</strong></>}
-            {offer.requirement_id && <> · <Link to={`/requirements/${offer.requirement_id}`}>View requirement</Link></>}
+            {offer.requirement_id && <> · <Link to={`/requests/${offer.requirement_id}`}>View requirement</Link></>}
           </div>
         </div>
         <div className="row">

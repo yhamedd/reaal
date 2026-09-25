@@ -21,6 +21,12 @@ import { SettingsPage } from './pages/Settings';
 import { ProfilePage } from './pages/Profile';
 import { NotFound, Forbidden } from './pages/Errors';
 
+/** Old /requirements links (bookmarks, notifications) keep working. */
+function LegacyRequestsRedirect() {
+  const { pathname, search } = useLocation();
+  return <Navigate to={pathname.replace(/^\/requirements/, '/requests') + search} replace />;
+}
+
 function Guard({ perm, children }: { perm?: string | string[]; children: ReactNode }) {
   const { can } = useAuth();
   const perms = perm ? (Array.isArray(perm) ? perm : [perm]) : [];
@@ -67,8 +73,9 @@ export function App() {
           <Route path="inventory/:id" element={<Guard perm="inventory.view"><UnitPage /></Guard>} />
           <Route path="owners" element={<Guard perm="owners.view"><OwnersPage /></Guard>} />
           <Route path="owners/:id" element={<Guard perm="owners.view"><OwnerPage /></Guard>} />
-          <Route path="requirements" element={<Guard perm="requirements.view"><RequirementsPage /></Guard>} />
-          <Route path="requirements/:id" element={<Guard perm="requirements.view"><RequirementPage /></Guard>} />
+          <Route path="requests" element={<Guard perm="requirements.view"><RequirementsPage /></Guard>} />
+          <Route path="requests/:id" element={<Guard perm="requirements.view"><RequirementPage /></Guard>} />
+          <Route path="requirements/*" element={<LegacyRequestsRedirect />} />
           <Route path="offers" element={<Guard perm="offers.create"><OffersPage /></Guard>} />
           <Route path="offers/new" element={<Guard perm="offers.create"><OfferCreatorPage /></Guard>} />
           <Route path="offers/:id" element={<Guard perm="offers.create"><OfferDetailPage /></Guard>} />

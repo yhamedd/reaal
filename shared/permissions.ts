@@ -23,9 +23,9 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'inventory.delete', label: 'Archive units', group: 'Inventory' },
   { key: 'inventory.export', label: 'Export inventory', group: 'Inventory' },
 
-  { key: 'requirements.view', label: 'View requirements', group: 'Requirements' },
-  { key: 'requirements.manage', label: 'Create & edit requirements', group: 'Requirements' },
-  { key: 'requirements.export', label: 'Export requirements', group: 'Requirements' },
+  { key: 'requirements.view', label: 'View requests', group: 'Requests' },
+  { key: 'requirements.manage', label: 'Create & edit requests', group: 'Requests' },
+  { key: 'requirements.export', label: 'Export requests', group: 'Requests' },
 
   { key: 'offers.create', label: 'Create offers', group: 'Offers' },
   { key: 'offers.view_all', label: "View everyone's offers", group: 'Offers' },

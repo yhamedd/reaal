@@ -3,7 +3,7 @@ import multer from 'multer';
 import { all, get, run } from '../db.js';
 import { HttpError, requirePermission } from '../auth.js';
 import { intParam } from '../util.js';
-import { executeImport, fieldsFor, suggestMapping, validateRows, type DuplicatePolicy, type ImportKind, type RowResult } from '../services/importer.js';
+import { executeImport, fieldsFor, suggestMapping, validateRows, type DuplicatePolicy, type ImportKind, type ImportOptions, type RowResult } from '../services/importer.js';
 import { buildXlsx, parseSpreadsheet } from '../services/spreadsheet.js';
 import { logActivity } from '../activity.js';
 
@@ -79,16 +79,23 @@ importsRouter.get('/:id', requirePermission('imports.run'), (req, res) => {
     total: rows.length,
     preview: rows.slice(0, 25),
     mapping: imp.mapping ? JSON.parse(imp.mapping) : {},
+    options: imp.options ? JSON.parse(imp.options) : {},
     summary: imp.summary ? JSON.parse(imp.summary) : null,
     result: imp.result ? JSON.parse(imp.result) : null,
     fields: fieldsFor(imp.kind),
   });
 });
 
-function runValidation(db: import('../db.js').DB, imp: any, mapping: Record<string, string>) {
+function runValidation(db: import('../db.js').DB, imp: any, mapping: Record<string, string>, options: ImportOptions) {
   const headers: string[] = JSON.parse(imp.headers);
   const rows = JSON.parse(imp.rows);
-  return validateRows(db, imp.kind, headers, rows, mapping);
+  return validateRows(db, imp.kind, headers, rows, mapping, options);
+}
+
+function cleanOptions(v: unknown): ImportOptions {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const str = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, 120) : null);
+  return { developer: str(o.developer), location: str(o.location), status: str(o.status) };
 }
 
 importsRouter.post('/:id/validate', requirePermission('imports.run'), (req, res) => {
@@ -104,8 +111,9 @@ importsRouter.post('/:id/validate', requirePermission('imports.run'), (req, res)
     seen.add(t);
     if (!JSON.parse(imp.headers).includes(h)) delete mapping[h];
   }
-  const { summary, results } = runValidation(db, imp, mapping);
-  run(db, "UPDATE imports SET mapping = ?, summary = ?, status = 'validated' WHERE id = ?", [JSON.stringify(mapping), JSON.stringify(summary), imp.id]);
+  const options = cleanOptions(req.body?.options);
+  const { summary, results } = runValidation(db, imp, mapping, options);
+  run(db, "UPDATE imports SET mapping = ?, options = ?, summary = ?, status = 'validated' WHERE id = ?", [JSON.stringify(mapping), JSON.stringify(options), JSON.stringify(summary), imp.id]);
   const problems = results.filter((r) => r.status !== 'ready' || r.warnings.length);
   res.json({ summary, rows: problems.slice(0, 1000), ready_sample: results.filter((r) => r.status === 'ready').slice(0, 10) });
 });
@@ -118,7 +126,7 @@ importsRouter.post('/:id/confirm', requirePermission('imports.run'), (req, res) 
   const policy: DuplicatePolicy = ['skip', 'create', 'update'].includes(req.body?.duplicates) ? req.body.duplicates : 'skip';
   const mapping = JSON.parse(imp.mapping || '{}');
   // Validate again so the import reflects the database at confirmation time.
-  const { summary, results } = runValidation(db, imp, mapping);
+  const { summary, results } = runValidation(db, imp, mapping, cleanOptions(JSON.parse(imp.options || '{}')));
   if (summary.missing_required.length) throw new HttpError(400, `Map the required columns first: ${summary.missing_required.join(', ')}`);
   const counts = executeImport(db, req.user!, imp.id, imp.kind, results as RowResult[], policy, imp.filename);
   run(db, 'UPDATE imports SET summary = ? WHERE id = ?', [JSON.stringify(summary), imp.id]);

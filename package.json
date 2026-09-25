@@ -10,9 +10,9 @@
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "NODE_ENV=production node --env-file-if-exists=.env --disable-warning=ExperimentalWarning dist-server/server/index.js",
-    "seed": "tsx --env-file-if-exists=.env server/seed-cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "reset": "tsx server/reset-cli.ts"
   },
   "engines": {
     "node": ">=22.13"

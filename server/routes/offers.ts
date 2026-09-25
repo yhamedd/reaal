@@ -91,7 +91,7 @@ offersRouter.post('/', requirePermission('offers.create'), (req, res) => {
   if (!content.trim()) throw new HttpError(400, 'Offer content is empty');
   if (content.length > 50_000) throw new HttpError(400, 'Offer content is too long');
   const requirementId = Number(req.body?.requirement_id) || null;
-  if (requirementId && !get(db, 'SELECT 1 FROM requirements WHERE id = ?', [requirementId])) throw new HttpError(400, 'Unknown requirement');
+  if (requirementId && !get(db, 'SELECT 1 FROM requirements WHERE id = ?', [requirementId])) throw new HttpError(400, 'Unknown request');
   const clientName = req.body?.client_name ? String(req.body.client_name).slice(0, 200) : null;
   const id = tx(db, () => {
     const { lastId } = run(db, 'INSERT INTO offers (created_by, client_name, requirement_id, template, content) VALUES (?, ?, ?, ?, ?)', [

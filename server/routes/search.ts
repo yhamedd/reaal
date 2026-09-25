@@ -27,15 +27,15 @@ searchRouter.get('/', requireAuth, (req, res) => {
   if (can(req.user, 'owners.view')) {
     const phoneClause = looksLikePhone && canContact ? 'OR o.primary_phone_norm LIKE ? OR o.secondary_phone_norm LIKE ? OR o.whatsapp_norm LIKE ?' : '';
     const code = q.match(/^o-?0*(\d+)$/i);
-    const params: any[] = [like, like];
+    const params: any[] = [like, like, like];
     if (phoneClause) params.push(phoneLike, phoneLike, phoneLike);
     params.push(code ? Number(code[1]) : -1);
     out.owners = all<any>(
       db,
-      `SELECT o.id, o.name, o.primary_phone, o.email, o.status,
+      `SELECT o.id, o.name, o.name_ar, o.primary_phone, o.email, o.status,
               (SELECT COUNT(*) FROM units u WHERE u.owner_id = o.id AND u.archived_at IS NULL) AS unit_count
          FROM owners o
-        WHERE o.name LIKE ? ESCAPE '\\' OR o.email LIKE ? ESCAPE '\\' ${phoneClause} OR o.id = ?
+        WHERE o.name LIKE ? ESCAPE '\\' OR o.name_ar LIKE ? ESCAPE '\\' OR o.email LIKE ? ESCAPE '\\' ${phoneClause} OR o.id = ?
         ORDER BY (o.status = 'Archived'), o.name COLLATE NOCASE LIMIT 8`,
       params,
     ).map((o) => redactOwner(req.user, { ...o, code: ownerCode(o.id) }));

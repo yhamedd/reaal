@@ -100,6 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_taggings_entity ON taggings(entity_type, entity_i
 CREATE TABLE IF NOT EXISTS owners (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
+  name_ar TEXT,
   primary_phone TEXT,
   primary_phone_norm TEXT,
   secondary_phone TEXT,
@@ -107,6 +108,7 @@ CREATE TABLE IF NOT EXISTS owners (
   whatsapp TEXT,
   whatsapp_norm TEXT,
   email TEXT,
+  address TEXT,
   assigned_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   source TEXT,
   status TEXT NOT NULL DEFAULT 'Active',
@@ -301,6 +303,7 @@ CREATE TABLE IF NOT EXISTS imports (
   headers TEXT NOT NULL DEFAULT '[]',
   rows TEXT NOT NULL DEFAULT '[]',
   mapping TEXT,
+  options TEXT,
   summary TEXT,
   result TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -314,7 +317,20 @@ export function openDb(file: string): DB {
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Adds columns introduced after a database was first created. */
+function migrate(db: DB) {
+  const addColumn = (table: string, column: string, type: string) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  };
+  addColumn('owners', 'name_ar', 'TEXT');
+  addColumn('owners', 'address', 'TEXT');
+  addColumn('imports', 'options', 'TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_owners_name_ar ON owners(name_ar)');
 }
 
 export function all<T = any>(db: DB, sql: string, params: Params = []): T[] {

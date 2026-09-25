@@ -39,8 +39,8 @@ export function QuickCreateHost({ children }: { children: ReactNode }) {
         </Drawer>
       )}
       {state?.kind === 'requirement' && (
-        <Drawer title="Add requirement" onClose={close} wide>
-          <RequirementForm onSaved={saved('/requirements')} onCancel={close} />
+        <Drawer title="Add request" onClose={close} wide>
+          <RequirementForm onSaved={saved('/requests')} onCancel={close} />
         </Drawer>
       )}
     </Ctx.Provider>

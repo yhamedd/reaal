@@ -44,9 +44,9 @@ export const UNIT_LOG_FIELDS: Record<string, FieldMeta> = Object.fromEntries(
 
 export const UNIT_SELECT = `
   SELECT u.*,
-         o.name AS owner_name, o.primary_phone AS owner_phone, o.secondary_phone AS owner_secondary_phone,
+         o.name AS owner_name, o.name_ar AS owner_name_ar, o.primary_phone AS owner_phone, o.secondary_phone AS owner_secondary_phone,
          o.whatsapp AS owner_whatsapp, o.email AS owner_email, o.status AS owner_status,
-         d.name AS developer, p.name AS project,
+         d.name AS developer, p.name AS project, p.location AS project_location,
          a.name AS agent_name, a.phone AS agent_phone, cb.name AS created_by_name,
          (SELECT COUNT(*) FROM files f WHERE f.entity_type = 'unit' AND f.entity_id = u.id AND f.category = 'image') AS image_count
     FROM units u
@@ -73,7 +73,7 @@ export const UNIT_SORTS: Record<string, string> = {
   finishing: 'u.finishing',
   furnished: 'u.furnished',
   view: 'u.view',
-  location: 'u.location',
+  location: 'COALESCE(u.location, p.location) COLLATE NOCASE',
   delivery: 'u.delivery',
   asking_price: 'u.asking_price',
   original_price: 'u.original_price',
@@ -112,10 +112,11 @@ export function buildUnitWhere(
       "u.phase LIKE ? ESCAPE '\\'",
       "u.property_type LIKE ? ESCAPE '\\'",
       "o.name LIKE ? ESCAPE '\\'",
+      "o.name_ar LIKE ? ESCAPE '\\'",
       "a.name LIKE ? ESCAPE '\\'",
       "u.location LIKE ? ESCAPE '\\'",
     ];
-    params.push(like, like, like, like, like, like, like, like);
+    params.push(like, like, like, like, like, like, like, like, like);
     // "Mivida A12" should match project + unit number
     const words = q.split(/\s+/).filter(Boolean);
     if (words.length > 1) {
@@ -207,6 +208,10 @@ export function buildUnitWhere(
   return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
 }
 
+/** Default order: grouped by area, then developer, project, phase and unit (V-V-9 before V-V-10). */
+export const DEFAULT_UNIT_ORDER =
+  'COALESCE(u.location, p.location) IS NULL, COALESCE(u.location, p.location) COLLATE NOCASE, d.name COLLATE NOCASE, p.name COLLATE NOCASE, u.phase COLLATE NOCASE, length(u.unit_number), u.unit_number COLLATE NOCASE, u.id';
+
 export function orderBy(sort: SortSpec[] | undefined, map: Record<string, string>, fallback: string) {
   const parts = (sort ?? [])
     .filter((s) => map[s.key])
@@ -252,6 +257,9 @@ export function findUnitDuplicates(
     `${UNIT_SELECT} WHERE u.project_id = ? AND u.unit_number_norm = ? AND u.id <> ? AND u.archived_at IS NULL`,
     [project_id, norm, excludeId ?? 0],
   );
-  // Same unit number in different phases is a weaker signal but still worth showing.
-  return rows.map((r) => ({ ...r, same_phase: (r.phase ?? '').toLowerCase() === (phase ?? '').toLowerCase() }));
+  // Same unit number in a different phase is a different unit; only flag when phases match or one is unknown.
+  const want = (phase ?? '').trim().toLowerCase();
+  return rows
+    .filter((r) => !want || !(r.phase ?? '').trim() || (r.phase ?? '').trim().toLowerCase() === want)
+    .map((r) => ({ ...r, same_phase: (r.phase ?? '').trim().toLowerCase() === want }));
 }

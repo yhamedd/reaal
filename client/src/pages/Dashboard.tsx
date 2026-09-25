@@ -38,7 +38,7 @@ export function DashboardPage() {
     { key: 'reserved_units', label: 'Reserved Units', to: f({ status: ['Reserved'] }), color: 'var(--warn)' },
     { key: 'sold_units', label: 'Sold Units', to: f({ status: ['Sold'] }), color: 'var(--info)' },
     { key: 'total_owners', label: 'Total Owners', to: '/owners' },
-    { key: 'active_requirements', label: 'Active Requirements', to: '/requirements?status=Active,Contacted' },
+    { key: 'active_requirements', label: 'Active Requests', to: '/requests?status=Active,Contacted' },
     { key: 'offers_created', label: 'Offers Created', to: '/offers' },
     { key: 'units_this_week', label: 'Units Added This Week', to: f({ created_from: weekAgo }) },
   ].filter((c) => k[c.key] !== null && k[c.key] !== undefined);
@@ -61,7 +61,7 @@ export function DashboardPage() {
         <div className="quick-actions">
           {can('inventory.create') && <button className="btn primary" onClick={() => quick('unit')}><Plus size={15} /> Add Unit</button>}
           {can('owners.create') && <button className="btn" onClick={() => quick('owner')}><Plus size={15} /> Add Owner</button>}
-          {can('requirements.manage') && <button className="btn" onClick={() => quick('requirement')}><Plus size={15} /> Add Requirement</button>}
+          {can('requirements.manage') && <button className="btn" onClick={() => quick('requirement')}><Plus size={15} /> Add Request</button>}
           {can('offers.create') && <button className="btn" onClick={() => navigate('/offers/new')}><FileText size={15} /> Create Offer</button>}
           {can('imports.run') && <button className="btn" onClick={() => navigate('/imports')}><FileSpreadsheet size={15} /> Import Excel</button>}
         </div>

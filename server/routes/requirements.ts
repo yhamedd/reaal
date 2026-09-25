@@ -144,8 +144,8 @@ requirementsRouter.post('/', requirePermission('requirements.manage'), (req, res
       req.user!.id,
     ]);
     if (Array.isArray(req.body?.tag_ids)) setTags(db, 'requirement', lastId, idList(req.body.tag_ids));
-    logActivity(db, { userId: req.user!.id, action: 'created', entityType: 'requirement', entityId: lastId, label: data.client_name, message: `added a requirement for ${data.client_name}` });
-    if (data.assigned_user_id !== req.user!.id) notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned the requirement for ${data.client_name} to you`, `/requirements/${lastId}`);
+    logActivity(db, { userId: req.user!.id, action: 'created', entityType: 'requirement', entityId: lastId, label: data.client_name, message: `added a request for ${data.client_name}` });
+    if (data.assigned_user_id !== req.user!.id) notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned the request for ${data.client_name} to you`, `/requests/${lastId}`);
     markMatchesSeen(db, get<RequirementRow>(db, 'SELECT * FROM requirements WHERE id = ?', [lastId])!);
     return lastId;
   });
@@ -156,7 +156,7 @@ requirementsRouter.get('/:id', requirePermission('requirements.view'), (req, res
   const db = req.db;
   const id = intParam(req.params.id);
   const r = get<any>(db, `${SELECT} WHERE r.id = ?`, [id]);
-  if (!r) throw new HttpError(404, 'Requirement not found');
+  if (!r) throw new HttpError(404, 'Request not found');
   const offers = all<any>(
     db,
     `SELECT o.id, o.template, o.created_at, u.name AS created_by_name,
@@ -171,7 +171,7 @@ requirementsRouter.get('/:id/matches', requirePermission('requirements.view', 'i
   const db = req.db;
   const id = intParam(req.params.id);
   const r = get<RequirementRow>(db, 'SELECT * FROM requirements WHERE id = ?', [id]);
-  if (!r) throw new HttpError(404, 'Requirement not found');
+  if (!r) throw new HttpError(404, 'Request not found');
   const includeExcluded = req.query.include_excluded === '1';
   const offered = new Set(
     all<{ unit_id: number }>(db, 'SELECT DISTINCT ou.unit_id FROM offer_units ou JOIN offers o ON o.id = ou.offer_id WHERE o.requirement_id = ?', [id]).map((x) => x.unit_id),
@@ -186,7 +186,7 @@ requirementsRouter.post('/:id/exclusions', requirePermission('requirements.manag
   const id = intParam(req.params.id);
   const unitIds = idList(req.body?.unit_ids);
   const r = get<any>(db, 'SELECT client_name FROM requirements WHERE id = ?', [id]);
-  if (!r) throw new HttpError(404, 'Requirement not found');
+  if (!r) throw new HttpError(404, 'Request not found');
   for (const u of unitIds) {
     run(db, 'INSERT OR IGNORE INTO requirement_exclusions (requirement_id, unit_id, created_by) VALUES (?, ?, ?)', [id, u, req.user!.id]);
   }
@@ -205,7 +205,7 @@ requirementsRouter.patch('/:id', requirePermission('requirements.manage'), (req,
   const db = req.db;
   const id = intParam(req.params.id);
   const before = get<any>(db, 'SELECT * FROM requirements WHERE id = ?', [id]);
-  if (!before) throw new HttpError(404, 'Requirement not found');
+  if (!before) throw new HttpError(404, 'Request not found');
   const data = normalise(coerce(req.body ?? {}, SPEC, true));
   tx(db, () => {
     const keys = Object.keys(data);
@@ -223,7 +223,7 @@ requirementsRouter.patch('/:id', requirePermission('requirements.manage'), (req,
         logActivity(db, { userId: req.user!.id, action: 'updated', entityType: 'requirement', entityId: id, label: before.client_name, field: 'property_types', oldValue: before.property_types, newValue: data.property_types, message: `changed property types for ${before.client_name}` });
       }
       if (data.assigned_user_id && data.assigned_user_id !== before.assigned_user_id && data.assigned_user_id !== req.user!.id) {
-        notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned the requirement for ${before.client_name} to you`, `/requirements/${id}`);
+        notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned the request for ${before.client_name} to you`, `/requests/${id}`);
       }
       // Criteria changed: current matches are the new baseline for "new match" alerts.
       markMatchesSeen(db, get<RequirementRow>(db, 'SELECT * FROM requirements WHERE id = ?', [id])!);
@@ -237,9 +237,9 @@ requirementsRouter.post('/:id/archive', requirePermission('requirements.manage')
   const db = req.db;
   const id = intParam(req.params.id);
   const r = get<any>(db, 'SELECT client_name FROM requirements WHERE id = ?', [id]);
-  if (!r) throw new HttpError(404, 'Requirement not found');
+  if (!r) throw new HttpError(404, 'Request not found');
   run(db, 'UPDATE requirements SET archived_at = ?, updated_at = ? WHERE id = ?', [nowIso(), nowIso(), id]);
-  logActivity(db, { userId: req.user!.id, action: 'archived', entityType: 'requirement', entityId: id, label: r.client_name, message: `archived the requirement for ${r.client_name}` });
+  logActivity(db, { userId: req.user!.id, action: 'archived', entityType: 'requirement', entityId: id, label: r.client_name, message: `archived the request for ${r.client_name}` });
   res.json({ ok: true });
 });
 
@@ -247,14 +247,14 @@ requirementsRouter.delete('/:id', requirePermission('records.purge'), (req, res)
   const db = req.db;
   const id = intParam(req.params.id);
   const r = get<any>(db, 'SELECT * FROM requirements WHERE id = ?', [id]);
-  if (!r) throw new HttpError(404, 'Requirement not found');
+  if (!r) throw new HttpError(404, 'Request not found');
   if (String(req.body?.confirm ?? '') !== r.client_name) throw new HttpError(400, 'Type the client name exactly to confirm permanent deletion');
   tx(db, () => {
     deleteEntityFiles(db, 'requirement', id);
     run(db, "DELETE FROM notes WHERE entity_type = 'requirement' AND entity_id = ?", [id]);
     run(db, "DELETE FROM taggings WHERE entity_type = 'requirement' AND entity_id = ?", [id]);
     run(db, 'DELETE FROM requirements WHERE id = ?', [id]);
-    logActivity(db, { userId: req.user!.id, action: 'purged', entityType: 'requirement', entityId: id, label: r.client_name, message: `permanently deleted the requirement for ${r.client_name}` });
+    logActivity(db, { userId: req.user!.id, action: 'purged', entityType: 'requirement', entityId: id, label: r.client_name, message: `permanently deleted the request for ${r.client_name}` });
   });
   res.json({ ok: true });
 });
