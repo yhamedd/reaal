@@ -79,12 +79,12 @@ function toSql(d: Date) {
   return d.toISOString().replace('T', ' ').slice(0, 19);
 }
 
-export async function createSession(db: DB, userId: number, remember: boolean, req: Request) {
-  const settings = (await getSettings(db)).security;
+export function createSession(db: DB, userId: number, remember: boolean, req: Request) {
+  const settings = getSettings(db).security;
   const token = randomToken();
   const lifetimeSeconds = remember ? settings.remember_days * 86400 : settings.session_hours * 3600;
   const expires = addSeconds(new Date(), lifetimeSeconds);
-  await run(
+  run(
     db,
     `INSERT INTO sessions (id, user_id, remember, expires_at, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)`,
     [sha256(token), userId, remember ? 1 : 0, toSql(expires), req.ip ?? null, String(req.headers['user-agent'] ?? '').slice(0, 200)],
@@ -92,12 +92,12 @@ export async function createSession(db: DB, userId: number, remember: boolean, r
   return { token, expires, maxAge: remember ? lifetimeSeconds * 1000 : undefined };
 }
 
-export async function destroySession(db: DB, token: string) {
-  await run(db, 'DELETE FROM sessions WHERE id = ?', [sha256(token)]);
+export function destroySession(db: DB, token: string) {
+  run(db, 'DELETE FROM sessions WHERE id = ?', [sha256(token)]);
 }
 
-export async function loadUser(db: DB, userId: number): Promise<AuthUser | undefined> {
-  const row = await get<any>(
+export function loadUser(db: DB, userId: number): AuthUser | undefined {
+  const row = get<any>(
     db,
     `SELECT u.id, u.name, u.email, u.phone, u.role_id, u.status, u.must_change_password,
             r.key AS role_key, r.name AS role_name, r.permissions
@@ -128,30 +128,30 @@ export async function loadUser(db: DB, userId: number): Promise<AuthUser | undef
  * Resolves the session cookie into req.user. Sessions expire both on their
  * absolute lifetime and after the configurable inactivity window.
  */
-export async function sessionMiddleware(req: Request, res: Response, next: NextFunction) {
+export function sessionMiddleware(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies?.[SESSION_COOKIE];
   if (!token) return next();
   const db = req.db;
   const id = sha256(token);
-  const session = await get<any>(db, 'SELECT * FROM sessions WHERE id = ?', [id]);
+  const session = get<any>(db, 'SELECT * FROM sessions WHERE id = ?', [id]);
   if (!session) {
     res.clearCookie(SESSION_COOKIE);
     return next();
   }
   const now = new Date();
-  const inactivity = (await getSettings(db)).security.inactivity_minutes;
+  const inactivity = getSettings(db).security.inactivity_minutes;
   const lastSeen = new Date(session.last_seen.replace(' ', 'T') + 'Z');
   const expires = new Date(session.expires_at.replace(' ', 'T') + 'Z');
   const idleExpired = !session.remember && inactivity > 0 && now.getTime() - lastSeen.getTime() > inactivity * 60_000;
   if (expires < now || idleExpired) {
-    await run(db, 'DELETE FROM sessions WHERE id = ?', [id]);
+    run(db, 'DELETE FROM sessions WHERE id = ?', [id]);
     res.clearCookie(SESSION_COOKIE);
     res.setHeader('X-Session-Expired', idleExpired ? 'inactivity' : 'expired');
     return next();
   }
-  const user = await loadUser(db, session.user_id);
+  const user = loadUser(db, session.user_id);
   if (!user) {
-    await run(db, 'DELETE FROM sessions WHERE id = ?', [id]);
+    run(db, 'DELETE FROM sessions WHERE id = ?', [id]);
     res.clearCookie(SESSION_COOKIE);
     return next();
   }
@@ -160,8 +160,8 @@ export async function sessionMiddleware(req: Request, res: Response, next: NextF
   // Heartbeat endpoints must not count as activity or the idle timeout never fires.
   if (!req.path.startsWith('/api/notifications/count')) {
     const ts = nowIso();
-    await run(db, 'UPDATE sessions SET last_seen = ? WHERE id = ?', [ts, id]);
-    await run(db, 'UPDATE users SET last_activity = ? WHERE id = ?', [ts, user.id]);
+    run(db, 'UPDATE sessions SET last_seen = ? WHERE id = ?', [ts, id]);
+    run(db, 'UPDATE users SET last_activity = ? WHERE id = ?', [ts, user.id]);
   }
   next();
 }
@@ -234,8 +234,8 @@ export function clearAllThrottles() {
   ipAttempts.clear();
 }
 
-export async function validatePassword(db: DB, password: unknown): Promise<string | null> {
-  const min = (await getSettings(db)).security.min_password_length;
+export function validatePassword(db: DB, password: unknown): string | null {
+  const min = getSettings(db).security.min_password_length;
   if (typeof password !== 'string' || password.length < min) return `Password must be at least ${min} characters`;
   if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) return 'Password must include letters and numbers';
   return null;

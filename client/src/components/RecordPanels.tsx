@@ -246,17 +246,14 @@ export function FilesPanel({ entityType, entityId, files, onChange, canEdit, cat
 
   const upload = async (list: FileList | null) => {
     if (!list?.length) return;
+    const form = new FormData();
+    form.set('entity_type', entityType);
+    form.set('entity_id', String(entityId));
+    form.set('category', category);
+    Array.from(list).forEach((f) => form.append('files', f));
     setUploading(true);
     try {
-      // One file per request keeps each upload under hosting body-size limits.
-      for (const f of Array.from(list)) {
-        const form = new FormData();
-        form.set('entity_type', entityType);
-        form.set('entity_id', String(entityId));
-        form.set('category', category);
-        form.append('files', f);
-        await api.upload('/api/files', form);
-      }
+      await api.upload('/api/files', form);
       toast(`${list.length} file${list.length === 1 ? '' : 's'} uploaded`);
       onChange();
     } catch (e) {

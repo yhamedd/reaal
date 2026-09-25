@@ -86,10 +86,10 @@ export function idList(v: unknown): number[] {
   return arr.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0);
 }
 
-export async function getTags(db: DB, entityType: string, ids: number[]): Promise<Map<number, { id: number; name: string; color: string }[]>> {
+export function getTags(db: DB, entityType: string, ids: number[]): Map<number, { id: number; name: string; color: string }[]> {
   const map = new Map<number, { id: number; name: string; color: string }[]>();
   if (!ids.length) return map;
-  const rows = await all<any>(
+  const rows = all<any>(
     db,
     `SELECT tg.entity_id, t.id, t.name, t.color FROM taggings tg JOIN tags t ON t.id = tg.tag_id
       WHERE tg.entity_type = ? AND tg.entity_id IN (${ids.map(() => '?').join(',')}) ORDER BY t.name`,
@@ -102,10 +102,10 @@ export async function getTags(db: DB, entityType: string, ids: number[]): Promis
   return map;
 }
 
-export async function setTags(db: DB, entityType: string, entityId: number, tagIds: number[]) {
-  await run(db, 'DELETE FROM taggings WHERE entity_type = ? AND entity_id = ?', [entityType, entityId]);
+export function setTags(db: DB, entityType: string, entityId: number, tagIds: number[]) {
+  run(db, 'DELETE FROM taggings WHERE entity_type = ? AND entity_id = ?', [entityType, entityId]);
   for (const id of new Set(tagIds)) {
-    await run(db, 'INSERT OR IGNORE INTO taggings (tag_id, entity_type, entity_id) SELECT id, ?, ? FROM tags WHERE id = ?', [
+    run(db, 'INSERT OR IGNORE INTO taggings (tag_id, entity_type, entity_id) SELECT id, ?, ? FROM tags WHERE id = ?', [
       entityType,
       entityId,
       id,

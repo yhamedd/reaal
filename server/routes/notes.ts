@@ -7,28 +7,28 @@ import { assertEntityAccess } from './files.js';
 
 export const notesRouter = Router();
 
-async function entityInfo(db: import('../db.js').DB, type: string, id: number): Promise<{ label: string; link: string } | null> {
+function entityInfo(db: import('../db.js').DB, type: string, id: number): { label: string; link: string } | null {
   if (type === 'unit') {
-    if (!await get(db, 'SELECT 1 FROM units WHERE id = ?', [id])) return null;
-    return { label: await unitLabel(db, id), link: `/inventory/${id}` };
+    if (!get(db, 'SELECT 1 FROM units WHERE id = ?', [id])) return null;
+    return { label: unitLabel(db, id), link: `/inventory/${id}` };
   }
   if (type === 'owner') {
-    const o = await get<any>(db, 'SELECT name FROM owners WHERE id = ?', [id]);
+    const o = get<any>(db, 'SELECT name FROM owners WHERE id = ?', [id]);
     return o ? { label: o.name, link: `/owners/${id}` } : null;
   }
   if (type === 'requirement') {
-    const r = await get<any>(db, 'SELECT client_name FROM requirements WHERE id = ?', [id]);
+    const r = get<any>(db, 'SELECT client_name FROM requirements WHERE id = ?', [id]);
     return r ? { label: `${r.client_name}'s requirement`, link: `/requirements/${id}` } : null;
   }
   return null;
 }
 
-notesRouter.get('/', requireAuth, async (req, res) => {
+notesRouter.get('/', requireAuth, (req, res) => {
   const type = String(req.query.entity_type ?? '');
   const id = intParam(req.query.entity_id, 'entity_id');
   assertEntityAccess(req, type, 'view');
   res.json(
-    await all(
+    all(
       req.db,
       `SELECT n.*, u.name AS author_name FROM notes n LEFT JOIN users u ON u.id = n.author_id
         WHERE n.entity_type = ? AND n.entity_id = ? ORDER BY n.created_at DESC, n.id DESC`,
@@ -37,7 +37,7 @@ notesRouter.get('/', requireAuth, async (req, res) => {
   );
 });
 
-notesRouter.post('/', requireAuth, async (req, res) => {
+notesRouter.post('/', requireAuth, (req, res) => {
   const db = req.db;
   const type = String(req.body?.entity_type ?? '');
   const id = intParam(req.body?.entity_id, 'entity_id');
@@ -45,14 +45,14 @@ notesRouter.post('/', requireAuth, async (req, res) => {
   const content = String(req.body?.content ?? '').trim();
   if (!content) throw new HttpError(400, 'Write something first');
   if (content.length > 5000) throw new HttpError(400, 'Note is too long');
-  const info = await entityInfo(db, type, id);
+  const info = entityInfo(db, type, id);
   if (!info) throw new HttpError(404, 'Record not found');
-  const { lastId } = await run(db, 'INSERT INTO notes (entity_type, entity_id, content, author_id) VALUES (?, ?, ?, ?)', [type, id, content, req.user!.id]);
-  await logActivity(db, { userId: req.user!.id, action: 'note_added', entityType: type, entityId: id, label: info.label, message: `added a note to ${info.label}` });
+  const { lastId } = run(db, 'INSERT INTO notes (entity_type, entity_id, content, author_id) VALUES (?, ?, ?, ?)', [type, id, content, req.user!.id]);
+  logActivity(db, { userId: req.user!.id, action: 'note_added', entityType: type, entityId: id, label: info.label, message: `added a note to ${info.label}` });
 
   // @mentions: "@Sarah Ali" or "@Sarah" (when the first name is unique)
   if (content.includes('@')) {
-    const users = await all<{ id: number; name: string }>(db, "SELECT id, name FROM users WHERE status = 'active'");
+    const users = all<{ id: number; name: string }>(db, "SELECT id, name FROM users WHERE status = 'active'");
     const lower = content.toLowerCase();
     const firstNameCounts = new Map<string, number>();
     for (const u of users) {
@@ -68,18 +68,18 @@ notesRouter.post('/', requireAuth, async (req, res) => {
     }
     for (const uid of mentioned) {
       if (uid === req.user!.id) continue;
-      await notify(db, uid, 'mention', `${req.user!.name} mentioned you in a note on ${info.label}: “${content.slice(0, 120)}”`, info.link);
+      notify(db, uid, 'mention', `${req.user!.name} mentioned you in a note on ${info.label}: “${content.slice(0, 120)}”`, info.link);
     }
   }
   res.status(201).json({ id: lastId });
 });
 
-notesRouter.delete('/:id', requireAuth, async (req, res) => {
+notesRouter.delete('/:id', requireAuth, (req, res) => {
   const db = req.db;
-  const note = await get<any>(db, 'SELECT * FROM notes WHERE id = ?', [intParam(req.params.id)]);
+  const note = get<any>(db, 'SELECT * FROM notes WHERE id = ?', [intParam(req.params.id)]);
   if (!note) throw new HttpError(404, 'Note not found');
   if (note.author_id !== req.user!.id && !can(req.user, 'users.manage')) throw new HttpError(403, 'You can only delete your own notes');
-  await run(db, 'DELETE FROM notes WHERE id = ?', [note.id]);
-  await logActivity(db, { userId: req.user!.id, action: 'note_deleted', entityType: note.entity_type, entityId: note.entity_id, message: 'deleted a note' });
+  run(db, 'DELETE FROM notes WHERE id = ?', [note.id]);
+  logActivity(db, { userId: req.user!.id, action: 'note_deleted', entityType: note.entity_type, entityId: note.entity_id, message: 'deleted a note' });
   res.json({ ok: true });
 });

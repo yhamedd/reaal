@@ -109,40 +109,40 @@ export function scoreMatch(r: RequirementRow, u: any): { score: number; reasons:
   return { score: Math.min(100, score), reasons };
 }
 
-export async function findMatches(db: DB, r: RequirementRow, { includeExcluded = false } = {}) {
+export function findMatches(db: DB, r: RequirementRow, { includeExcluded = false } = {}) {
   const { where, params } = matchSql(r);
   const excluded = new Set(
-    (await all<{ unit_id: number }>(db, 'SELECT unit_id FROM requirement_exclusions WHERE requirement_id = ?', [r.id])).map((x) => x.unit_id),
+    all<{ unit_id: number }>(db, 'SELECT unit_id FROM requirement_exclusions WHERE requirement_id = ?', [r.id]).map((x) => x.unit_id),
   );
-  const rows = await all<any>(db, `${UNIT_SELECT} WHERE ${where} LIMIT 500`, params);
+  const rows = all<any>(db, `${UNIT_SELECT} WHERE ${where} LIMIT 500`, params);
   return rows
     .map((u) => ({ ...u, ...scoreMatch(r, u), excluded: excluded.has(u.id) }))
     .filter((u) => includeExcluded || !u.excluded)
     .sort((a, b) => b.score - a.score || (a.asking_price ?? 0) - (b.asking_price ?? 0));
 }
 
-export async function unitMatchesRequirement(db: DB, r: RequirementRow, unitId: number): Promise<boolean> {
+export function unitMatchesRequirement(db: DB, r: RequirementRow, unitId: number): boolean {
   const { where, params } = matchSql(r);
-  return !!await get(db, `SELECT 1 FROM units u WHERE u.id = ? AND ${where}`, [unitId, ...params]);
+  return !!get(db, `SELECT 1 FROM units u WHERE u.id = ? AND ${where}`, [unitId, ...params]);
 }
 
 /**
  * Called after a unit is created or changed: tells the agents of active
  * requirements that a new matching unit exists. Each pair notifies once.
  */
-export async function notifyNewMatches(db: DB, unitId: number, actorId: number) {
-  const reqs = await all<RequirementRow>(db, "SELECT * FROM requirements WHERE status IN ('Active', 'Contacted') AND archived_at IS NULL");
+export function notifyNewMatches(db: DB, unitId: number, actorId: number) {
+  const reqs = all<RequirementRow>(db, "SELECT * FROM requirements WHERE status IN ('Active', 'Contacted') AND archived_at IS NULL");
   if (!reqs.length) return 0;
   let n = 0;
-  const label = await unitLabel(db, unitId);
+  const label = unitLabel(db, unitId);
   for (const r of reqs) {
-    if (await get(db, 'SELECT 1 FROM requirement_match_seen WHERE requirement_id = ? AND unit_id = ?', [r.id, unitId])) continue;
-    if (await get(db, 'SELECT 1 FROM requirement_exclusions WHERE requirement_id = ? AND unit_id = ?', [r.id, unitId])) continue;
-    if (!await unitMatchesRequirement(db, r, unitId)) continue;
-    await run(db, 'INSERT OR IGNORE INTO requirement_match_seen (requirement_id, unit_id) VALUES (?, ?)', [r.id, unitId]);
+    if (get(db, 'SELECT 1 FROM requirement_match_seen WHERE requirement_id = ? AND unit_id = ?', [r.id, unitId])) continue;
+    if (get(db, 'SELECT 1 FROM requirement_exclusions WHERE requirement_id = ? AND unit_id = ?', [r.id, unitId])) continue;
+    if (!unitMatchesRequirement(db, r, unitId)) continue;
+    run(db, 'INSERT OR IGNORE INTO requirement_match_seen (requirement_id, unit_id) VALUES (?, ?)', [r.id, unitId]);
     const target = r.assigned_user_id;
     if (target && target !== actorId) {
-      await notify(db, target, 'match', `New match for ${r.client_name} (${requirementCode(r.id)}): ${label}`, `/requirements/${r.id}`);
+      notify(db, target, 'match', `New match for ${r.client_name} (${requirementCode(r.id)}): ${label}`, `/requirements/${r.id}`);
     }
     n++;
   }
@@ -150,8 +150,8 @@ export async function notifyNewMatches(db: DB, unitId: number, actorId: number) 
 }
 
 /** Marks all current matches as seen so a new requirement doesn't flood its agent later. */
-export async function markMatchesSeen(db: DB, r: RequirementRow) {
-  for (const u of await findMatches(db, r, { includeExcluded: true })) {
-    await run(db, 'INSERT OR IGNORE INTO requirement_match_seen (requirement_id, unit_id) VALUES (?, ?)', [r.id, u.id]);
+export function markMatchesSeen(db: DB, r: RequirementRow) {
+  for (const u of findMatches(db, r, { includeExcluded: true })) {
+    run(db, 'INSERT OR IGNORE INTO requirement_match_seen (requirement_id, unit_id) VALUES (?, ?)', [r.id, u.id]);
   }
 }

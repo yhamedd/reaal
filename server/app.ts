@@ -21,13 +21,11 @@ import { settingsRouter, masterRouter, templatesRouter, publicRouter } from './r
 import { viewsRouter } from './routes/views.js';
 import { importsRouter } from './routes/imports.js';
 import { exportsRouter } from './routes/exports.js';
-import { cleanupExpired, runVerificationCheck } from './jobs.js';
 
 export function createApp(db: DB, opts: { staticDir?: string } = {}) {
   const app = express();
   app.disable('x-powered-by');
-  // Vercel always sits behind its proxy; elsewhere opt in with TRUST_PROXY=true.
-  app.set('trust proxy', process.env.TRUST_PROXY === 'true' || !!process.env.VERCEL ? 1 : false);
+  app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
 
   app.use((req, res, next) => {
     req.db = db;
@@ -58,14 +56,6 @@ export function createApp(db: DB, opts: { staticDir?: string } = {}) {
   });
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
-  // Scheduled maintenance (Vercel Cron). Vercel sends "Authorization: Bearer $CRON_SECRET".
-  app.get('/api/cron/daily', async (req, res) => {
-    const secret = process.env.CRON_SECRET;
-    if (!secret || req.get('authorization') !== `Bearer ${secret}`) throw new HttpError(401, 'Unauthorized');
-    const notified = await runVerificationCheck(req.db);
-    await cleanupExpired(req.db);
-    res.json({ ok: true, notified });
-  });
   app.use('/api/public', publicRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/owners', ownersRouter);

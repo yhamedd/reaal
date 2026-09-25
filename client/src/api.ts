@@ -3,7 +3,7 @@ export class ApiError extends Error {
   body: any;
   fields: Record<string, string>;
   constructor(status: number, body: any) {
-    super(body?.error || (status === 413 ? 'That file is too large to upload. Try a smaller file (about 4 MB max).' : `Request failed (${status})`));
+    super(body?.error || `Request failed (${status})`);
     this.status = status;
     this.body = body;
     this.fields = body?.fields ?? {};

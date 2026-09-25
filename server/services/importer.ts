@@ -136,7 +136,7 @@ export interface ValidationSummary {
   missing_required: string[];
 }
 
-export async function validateRows(db: DB, kind: ImportKind, headers: string[], rows: Record<string, string>[], mapping: Record<string, string>) {
+export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: Record<string, string>[], mapping: Record<string, string>) {
   const fields = fieldsFor(kind);
   const fieldByKey = new Map(fields.map((f) => [f.key, f]));
   const inverse = new Map<string, string>(); // target → header
@@ -144,15 +144,15 @@ export async function validateRows(db: DB, kind: ImportKind, headers: string[], 
   const ignored = headers.filter((h) => !mapping[h] || !fieldByKey.has(mapping[h]));
   const missingRequired = fields.filter((f) => f.required && !inverse.has(f.key)).map((f) => f.label);
 
-  const users = await all<{ id: number; name: string; email: string }>(db, "SELECT id, name, email FROM users WHERE status = 'active'");
-  const tagNames = new Map((await all<{ id: number; name: string }>(db, 'SELECT id, name FROM tags')).map((t) => [t.name.toLowerCase(), t.id]));
+  const users = all<{ id: number; name: string; email: string }>(db, "SELECT id, name, email FROM users WHERE status = 'active'");
+  const tagNames = new Map(all<{ id: number; name: string }>(db, 'SELECT id, name FROM tags').map((t) => [t.name.toLowerCase(), t.id]));
   const newProjects = new Set<string>();
   const newDevelopers = new Set<string>();
   const seenUnits = new Map<string, number>();
   const seenOwnerPhones = new Map<string, number>();
   const results: RowResult[] = [];
 
-  for (const [idx, raw] of rows.entries()) {
+  rows.forEach((raw, idx) => {
     const r: RowResult = { row: idx + 2, status: 'ready', errors: [], warnings: [], data: {} };
     const val = (key: string) => {
       const h = inverse.get(key);
@@ -244,7 +244,7 @@ export async function validateRows(db: DB, kind: ImportKind, headers: string[], 
     const phones = ['primary_phone', 'secondary_phone', 'whatsapp'].map((k) => normalizePhone(r.data[k])).filter((p) => p.length >= 7);
     if (phones.length) {
       const ph = phones.map(() => '?').join(',');
-      const existing = await get<any>(
+      const existing = get<any>(
         db,
         `SELECT id, name FROM owners WHERE primary_phone_norm IN (${ph}) OR secondary_phone_norm IN (${ph}) OR whatsapp_norm IN (${ph}) LIMIT 1`,
         [...phones, ...phones, ...phones],
@@ -268,7 +268,7 @@ export async function validateRows(db: DB, kind: ImportKind, headers: string[], 
         r.owner_key = phones[0];
       }
     } else if (r.data.owner_name) {
-      const byName = await get<any>(db, 'SELECT id, name FROM owners WHERE TRIM(name) = ? COLLATE NOCASE LIMIT 1', [String(r.data.owner_name).trim()]);
+      const byName = get<any>(db, 'SELECT id, name FROM owners WHERE TRIM(name) = ? COLLATE NOCASE LIMIT 1', [String(r.data.owner_name).trim()]);
       if (byName) {
         r.owner_match_id = byName.id;
         if (kind === 'owners') {
@@ -286,18 +286,18 @@ export async function validateRows(db: DB, kind: ImportKind, headers: string[], 
 
     if (kind === 'inventory') {
       // Master data
-      if (r.data.developer && !await findDeveloper(db, r.data.developer)) newDevelopers.add(String(r.data.developer));
-      const project = r.data.project ? await findProject(db, r.data.project) : null;
+      if (r.data.developer && !findDeveloper(db, r.data.developer)) newDevelopers.add(String(r.data.developer));
+      const project = r.data.project ? findProject(db, r.data.project) : null;
       if (r.data.project && !project) {
         newProjects.add(String(r.data.project));
         r.warnings.push(`New project “${r.data.project}” will be created`);
       }
       if (r.data.property_type) {
-        const canonical = await canonicalValue(db, 'property_type', r.data.property_type);
+        const canonical = canonicalValue(db, 'property_type', r.data.property_type);
         if (canonical) r.data.property_type = canonical;
         else r.warnings.push(`Property type “${r.data.property_type}” is not in the master list`);
       }
-      if (r.data.finishing) r.data.finishing = await canonicalValue(db, 'finishing', r.data.finishing) ?? r.data.finishing;
+      if (r.data.finishing) r.data.finishing = canonicalValue(db, 'finishing', r.data.finishing) ?? r.data.finishing;
 
       // Duplicate property detection
       const unitNo = normalizeUnitNumber(r.data.unit_number);
@@ -305,7 +305,7 @@ export async function validateRows(db: DB, kind: ImportKind, headers: string[], 
       if (unitNo && r.data.project) {
         const key = `${String(r.data.project).toLowerCase()}|${unitNo}`;
         if (project) {
-          const dup = await get<any>(db, 'SELECT id FROM units WHERE project_id = ? AND unit_number_norm = ? AND archived_at IS NULL LIMIT 1', [project.id, unitNo]);
+          const dup = get<any>(db, 'SELECT id FROM units WHERE project_id = ? AND unit_number_norm = ? AND archived_at IS NULL LIMIT 1', [project.id, unitNo]);
           if (dup) {
             r.duplicate_unit_id = dup.id;
             r.status = 'duplicate';
@@ -323,7 +323,7 @@ export async function validateRows(db: DB, kind: ImportKind, headers: string[], 
 
     if (r.errors.length) r.status = 'error';
     results.push(r);
-  }
+  });
 
   if (missingRequired.length) {
     for (const r of results) {
@@ -346,26 +346,22 @@ export async function validateRows(db: DB, kind: ImportKind, headers: string[], 
   return { summary, results };
 }
 
-const IMPORT_CHUNK = 100;
-
 export type DuplicatePolicy = 'skip' | 'create' | 'update';
 
 const UNIT_KEYS = ['phase', 'unit_number', 'property_type', 'bua', 'land_area', 'bedrooms', 'bathrooms', 'floors', 'finishing', 'furnished', 'view', 'location', 'delivery', 'asking_price', 'original_price', 'paid_amount', 'remaining_amount', 'maintenance', 'payment_notes', 'status', 'assigned_user_id', 'source', 'last_verified'];
 
-export async function executeImport(rootDb: DB, user: AuthUser, importId: number, kind: ImportKind, results: RowResult[], policy: DuplicatePolicy, filename: string) {
+export function executeImport(db: DB, user: AuthUser, importId: number, kind: ImportKind, results: RowResult[], policy: DuplicatePolicy, filename: string) {
   const counts = { created_units: 0, updated_units: 0, created_owners: 0, linked_owners: 0, updated_owners: 0, skipped: 0, errors: 0 };
-  // Rows are committed in chunks so a large file never needs one long-running transaction.
-  let db: DB = rootDb;
-  {
+  tx(db, () => {
     const ownerCache = new Map<string, number>();
-    const resolveOwner = async (r: RowResult): Promise<number | null> => {
+    const resolveOwner = (r: RowResult): number | null => {
       if (r.owner_match_id) {
         counts.linked_owners++;
         return r.owner_match_id;
       }
       if (!r.data.owner_name && !r.data.primary_phone) return null;
       if (r.owner_key && ownerCache.has(r.owner_key)) return ownerCache.get(r.owner_key)!;
-      const id = await insertOwner(db, user, {
+      const id = insertOwner(db, user, {
         name: r.data.owner_name || 'Unknown owner',
         primary_phone: r.data.primary_phone ?? r.data.whatsapp ?? null,
         secondary_phone: r.data.secondary_phone ?? null,
@@ -379,87 +375,81 @@ export async function executeImport(rootDb: DB, user: AuthUser, importId: number
       if (r.owner_key) ownerCache.set(r.owner_key, id);
       return id;
     };
-    const addNoteAndTags = async (entityType: string, id: number, r: RowResult) => {
-      if (r.data.notes) await run(db, 'INSERT INTO notes (entity_type, entity_id, content, author_id) VALUES (?, ?, ?, ?)', [entityType, id, `Imported note: ${r.data.notes}`, user.id]);
-      for (const t of r.data.tag_ids ?? []) await run(db, 'INSERT OR IGNORE INTO taggings (tag_id, entity_type, entity_id) VALUES (?, ?, ?)', [t, entityType, id]);
+    const addNoteAndTags = (entityType: string, id: number, r: RowResult) => {
+      if (r.data.notes) run(db, 'INSERT INTO notes (entity_type, entity_id, content, author_id) VALUES (?, ?, ?, ?)', [entityType, id, `Imported note: ${r.data.notes}`, user.id]);
+      for (const t of r.data.tag_ids ?? []) run(db, 'INSERT OR IGNORE INTO taggings (tag_id, entity_type, entity_id) VALUES (?, ?, ?)', [t, entityType, id]);
     };
 
-    for (let start = 0; start < results.length; start += IMPORT_CHUNK) {
-      await tx(rootDb, async (t) => {
-        db = t;
-        for (const r of results.slice(start, start + IMPORT_CHUNK)) {
-          if (r.status === 'error') {
-            counts.errors++;
-            continue;
+    for (const r of results) {
+      if (r.status === 'error') {
+        counts.errors++;
+        continue;
+      }
+      if (r.status === 'duplicate' && policy === 'skip') {
+        counts.skipped++;
+        continue;
+      }
+      if (kind === 'owners') {
+        if (r.status === 'duplicate' && policy === 'update' && r.duplicate_owner_id) {
+          const patch: Record<string, any> = {};
+          if (r.data.secondary_phone) patch.secondary_phone = r.data.secondary_phone;
+          if (r.data.whatsapp) patch.whatsapp = r.data.whatsapp;
+          if (r.data.owner_email) patch.email = r.data.owner_email;
+          if (r.data.source) patch.source = r.data.source;
+          if (r.data.assigned_user_id) patch.assigned_user_id = r.data.assigned_user_id;
+          if (Object.keys(patch).length) {
+            if (patch.secondary_phone) patch.secondary_phone_norm = normalizePhone(patch.secondary_phone);
+            if (patch.whatsapp) patch.whatsapp_norm = normalizePhone(patch.whatsapp);
+            const cols = Object.keys(patch);
+            run(db, `UPDATE owners SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...cols.map((k) => patch[k]), r.duplicate_owner_id]);
           }
-          if (r.status === 'duplicate' && policy === 'skip') {
-            counts.skipped++;
-            continue;
-          }
-          if (kind === 'owners') {
-            if (r.status === 'duplicate' && policy === 'update' && r.duplicate_owner_id) {
-              const patch: Record<string, any> = {};
-              if (r.data.secondary_phone) patch.secondary_phone = r.data.secondary_phone;
-              if (r.data.whatsapp) patch.whatsapp = r.data.whatsapp;
-              if (r.data.owner_email) patch.email = r.data.owner_email;
-              if (r.data.source) patch.source = r.data.source;
-              if (r.data.assigned_user_id) patch.assigned_user_id = r.data.assigned_user_id;
-              if (Object.keys(patch).length) {
-                if (patch.secondary_phone) patch.secondary_phone_norm = normalizePhone(patch.secondary_phone);
-                if (patch.whatsapp) patch.whatsapp_norm = normalizePhone(patch.whatsapp);
-                const cols = Object.keys(patch);
-                await run(db, `UPDATE owners SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...cols.map((k) => patch[k]), r.duplicate_owner_id]);
-              }
-              await addNoteAndTags('owner', r.duplicate_owner_id, r);
-              counts.updated_owners++;
-              continue;
-            }
-            const id = await insertOwner(db, user, {
-              name: r.data.owner_name,
-              primary_phone: r.data.primary_phone ?? r.data.whatsapp ?? null,
-              secondary_phone: r.data.secondary_phone ?? null,
-              whatsapp: r.data.whatsapp ?? null,
-              email: r.data.owner_email ?? null,
-              source: r.data.source ?? 'Import',
-              assigned_user_id: r.data.assigned_user_id ?? null,
-              status: r.data.status ?? 'Active',
-            });
-            counts.created_owners++;
-            await addNoteAndTags('owner', id, r);
-            continue;
-          }
-
-          // Inventory
-          const developerId = r.data.developer ? await ensureDeveloper(db, r.data.developer) : null;
-          const project = r.data.project ? await ensureProject(db, r.data.project, developerId) : null;
-          const ownerId = await resolveOwner(r);
-          const unitData: Record<string, any> = {};
-          for (const k of UNIT_KEYS) if (r.data[k] !== undefined) unitData[k] = r.data[k];
-          unitData.project_id = project?.id ?? null;
-          unitData.developer_id = project?.developer_id ?? developerId;
-          if (ownerId) unitData.owner_id = ownerId;
-          if (!unitData.source) unitData.source = 'Import';
-
-          if (r.status === 'duplicate' && policy === 'update' && r.duplicate_unit_id) {
-            const keys = Object.keys(unitData).filter((k) => unitData[k] !== null && unitData[k] !== undefined && k !== 'source');
-            if (keys.includes('unit_number')) unitData.unit_number_norm = normalizeUnitNumber(unitData.unit_number);
-            const setKeys = keys.includes('unit_number') ? [...keys, 'unit_number_norm'] : keys;
-            if (setKeys.length) {
-              await run(db, `UPDATE units SET ${setKeys.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...setKeys.map((k) => unitData[k]), r.duplicate_unit_id]);
-            }
-            await addNoteAndTags('unit', r.duplicate_unit_id, r);
-            counts.updated_units++;
-            continue;
-          }
-          const id = await insertUnit(db, user, unitData);
-          await addNoteAndTags('unit', id, r);
-          counts.created_units++;
+          addNoteAndTags('owner', r.duplicate_owner_id, r);
+          counts.updated_owners++;
+          continue;
         }
-      });
-    }
-    db = rootDb;
+        const id = insertOwner(db, user, {
+          name: r.data.owner_name,
+          primary_phone: r.data.primary_phone ?? r.data.whatsapp ?? null,
+          secondary_phone: r.data.secondary_phone ?? null,
+          whatsapp: r.data.whatsapp ?? null,
+          email: r.data.owner_email ?? null,
+          source: r.data.source ?? 'Import',
+          assigned_user_id: r.data.assigned_user_id ?? null,
+          status: r.data.status ?? 'Active',
+        });
+        counts.created_owners++;
+        addNoteAndTags('owner', id, r);
+        continue;
+      }
 
-    await run(db, "UPDATE imports SET status = 'completed', result = ?, completed_at = datetime('now'), rows = '[]' WHERE id = ?", [JSON.stringify(counts), importId]);
+      // Inventory
+      const developerId = r.data.developer ? ensureDeveloper(db, r.data.developer) : null;
+      const project = r.data.project ? ensureProject(db, r.data.project, developerId) : null;
+      const ownerId = resolveOwner(r);
+      const unitData: Record<string, any> = {};
+      for (const k of UNIT_KEYS) if (r.data[k] !== undefined) unitData[k] = r.data[k];
+      unitData.project_id = project?.id ?? null;
+      unitData.developer_id = project?.developer_id ?? developerId;
+      if (ownerId) unitData.owner_id = ownerId;
+      if (!unitData.source) unitData.source = 'Import';
+
+      if (r.status === 'duplicate' && policy === 'update' && r.duplicate_unit_id) {
+        const keys = Object.keys(unitData).filter((k) => unitData[k] !== null && unitData[k] !== undefined && k !== 'source');
+        if (keys.includes('unit_number')) unitData.unit_number_norm = normalizeUnitNumber(unitData.unit_number);
+        const setKeys = keys.includes('unit_number') ? [...keys, 'unit_number_norm'] : keys;
+        if (setKeys.length) {
+          run(db, `UPDATE units SET ${setKeys.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...setKeys.map((k) => unitData[k]), r.duplicate_unit_id]);
+        }
+        addNoteAndTags('unit', r.duplicate_unit_id, r);
+        counts.updated_units++;
+        continue;
+      }
+      const id = insertUnit(db, user, unitData);
+      addNoteAndTags('unit', id, r);
+      counts.created_units++;
+    }
+
+    run(db, "UPDATE imports SET status = 'completed', result = ?, completed_at = datetime('now'), rows = '[]' WHERE id = ?", [JSON.stringify(counts), importId]);
     const parts = [
       counts.created_units && `${counts.created_units} units created`,
       counts.updated_units && `${counts.updated_units} units updated`,
@@ -468,7 +458,7 @@ export async function executeImport(rootDb: DB, user: AuthUser, importId: number
       counts.skipped && `${counts.skipped} duplicates skipped`,
       counts.errors && `${counts.errors} rows with errors skipped`,
     ].filter(Boolean);
-    await logActivity(db, {
+    logActivity(db, {
       userId: user.id,
       action: 'import_completed',
       entityType: 'import',
@@ -476,7 +466,7 @@ export async function executeImport(rootDb: DB, user: AuthUser, importId: number
       label: filename,
       message: `imported ${filename}: ${parts.join(', ') || 'no changes'}`,
     });
-    await run(db, 'INSERT INTO notifications (user_id, type, message, link) VALUES (?, ?, ?, ?)', [user.id, 'import', `Import of ${filename} completed – ${parts.join(', ') || 'no changes'}`, '/imports']);
-  }
+    run(db, 'INSERT INTO notifications (user_id, type, message, link) VALUES (?, ?, ?, ?)', [user.id, 'import', `Import of ${filename} completed – ${parts.join(', ') || 'no changes'}`, '/imports']);
+  });
   return counts;
 }

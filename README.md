@@ -6,7 +6,7 @@ One place for property owners, inventory, buyer requirements, matching and offer
 
 ## Quick start
 
-Requirements: **Node.js 22.9+**. Locally there's no database server to install: the app uses a SQLite file via libSQL. In production (Vercel) the same code talks to a hosted Turso database.
+Requirements: **Node.js 22.13+**. There's no separate database server: the app uses Node's built-in SQLite.
 
 ```bash
 npm install
@@ -24,21 +24,7 @@ npm run build
 npm start                    # serves the API and the built web app on $PORT (default 3000)
 ```
 
-When self-hosting, all data lives in `DATA_DIR` (default `./data`): `reaal.db` plus `uploads/`. Back up that folder. Run behind HTTPS; cookies are `Secure` in production unless `COOKIE_SECURE=false`.
-
-## Deploy to Vercel
-
-Vercel functions have no permanent disk, so the database lives in **Turso** (hosted SQLite) and uploaded photos and documents in **Vercel Blob**. Both have free tiers.
-
-1. **Import the repo:** on vercel.com, choose **Add New → Project**, pick this GitHub repository and keep the defaults (`vercel.json` sets the build). Don't deploy yet, or let the first deploy fail; that's fine.
-2. **Add the database:** in the project, open **Storage → Create / Browse Marketplace → Turso**, create a database and connect it to the project. This adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
-3. **Add file storage:** in **Storage → Create → Blob**, create a store and connect it. This adds `BLOB_READ_WRITE_TOKEN`.
-4. **Set environment variables:** under **Settings → Environment Variables**, add
-   - `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first Super Admin (and optionally `ADMIN_NAME`);
-   - `CRON_SECRET`, any long random string. It protects the daily job that sends verification reminders and cleans up expired sessions.
-5. **Redeploy** (Deployments → ⋯ → Redeploy). Open the site and sign in with the admin email and password. Tables are created automatically on first request.
-
-Limits on Vercel: each uploaded file or imported spreadsheet can be at most about 4 MB (Vercel's request size limit), and scheduled reminders run once a day. To load demo data into Turso, run `TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… npm run seed` from your computer.
+All data lives in `DATA_DIR` (default `./data`): `reaal.db` plus `uploads/`. Back up that folder. Run behind HTTPS; cookies are `Secure` in production unless `COOKIE_SECURE=false`.
 
 | Command | Purpose |
 | --- | --- |
@@ -116,14 +102,12 @@ Limits on Vercel: each uploaded file or imported spreadsheet can be at most abou
 ```
 shared/     Types and logic used by both sides: permissions catalogue, phone normalisation,
             number/money parsing, filter spec, constants
-server/     Express 5 API on libSQL (local SQLite file or Turso)
-  db.ts           schema (created automatically) and async query helpers
-  storage.ts      uploads on local disk or Vercel Blob
-  vercel.ts       serverless entry used by api/index.js
+server/     Express 5 API on node:sqlite
+  db.ts           schema (created automatically) and query helpers
   auth.ts         password hashing, sessions, throttling, permission middleware
   routes/         one router per area (units, owners, requirements, offers, imports, …)
   services/       unit queries & filters, matching, offer template engine, PDF, import pipeline
-  jobs.ts         verification notifications and cleanup (hourly when self-hosted, daily cron on Vercel)
+  jobs.ts         hourly verification notifications and cleanup
   test/           API integration tests
 client/     React 19 + Vite + React Router
   src/components/DataGrid.tsx   the virtualised spreadsheet grid

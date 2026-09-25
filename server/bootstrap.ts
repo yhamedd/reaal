@@ -27,28 +27,28 @@ export const DEFAULT_TAGS: [string, string][] = [
 ];
 
 /** Idempotent: safe to call on every start. Creates roles, the first admin and default master data. */
-export async function bootstrap(db: DB, opts: { adminEmail?: string; adminPassword?: string; adminName?: string } = {}) {
-  await tx(db, async (db) => {
+export function bootstrap(db: DB, opts: { adminEmail?: string; adminPassword?: string; adminName?: string } = {}) {
+  tx(db, () => {
     for (const role of DEFAULT_ROLES) {
-      const existing = await get<any>(db, 'SELECT id FROM roles WHERE key = ?', [role.key]);
+      const existing = get<any>(db, 'SELECT id FROM roles WHERE key = ?', [role.key]);
       if (!existing) {
-        await run(db, 'INSERT INTO roles (key, name, permissions, is_system) VALUES (?, ?, ?, 1)', [
+        run(db, 'INSERT INTO roles (key, name, permissions, is_system) VALUES (?, ?, ?, 1)', [
           role.key,
           role.name,
           JSON.stringify(role.permissions),
         ]);
       } else if (role.key === 'super_admin') {
         // Super Admin always holds every permission, including ones added in later versions.
-        await run(db, 'UPDATE roles SET permissions = ? WHERE id = ?', [JSON.stringify(ALL_PERMISSION_KEYS), existing.id]);
+        run(db, 'UPDATE roles SET permissions = ? WHERE id = ?', [JSON.stringify(ALL_PERMISSION_KEYS), existing.id]);
       }
     }
 
-    const userCount = (await get<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM users'))!.n;
+    const userCount = get<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM users')!.n;
     if (userCount === 0) {
-      const superRole = await get<any>(db, "SELECT id FROM roles WHERE key = 'super_admin'")!;
+      const superRole = get<any>(db, "SELECT id FROM roles WHERE key = 'super_admin'")!;
       const email = opts.adminEmail || 'admin@reaal.local';
       const password = opts.adminPassword || 'ChangeMe123';
-      await run(db, 'INSERT INTO users (name, email, password_hash, role_id, must_change_password) VALUES (?, ?, ?, ?, ?)', [
+      run(db, 'INSERT INTO users (name, email, password_hash, role_id, must_change_password) VALUES (?, ?, ?, ?, ?)', [
         opts.adminName || 'System Admin',
         email,
         hashPassword(password),
@@ -60,22 +60,22 @@ export async function bootstrap(db: DB, opts: { adminEmail?: string; adminPasswo
       }
     }
 
-    const hasMaster = (await get<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM master_values'))!.n;
+    const hasMaster = get<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM master_values')!.n;
     if (!hasMaster) {
       for (const [category, values] of Object.entries(DEFAULT_MASTER)) {
-        for (const [i, v] of values.entries()) await run(db, 'INSERT INTO master_values (category, value, sort) VALUES (?, ?, ?)', [category, v, i]);
+        values.forEach((v, i) => run(db, 'INSERT INTO master_values (category, value, sort) VALUES (?, ?, ?)', [category, v, i]));
       }
       for (const [dev, projects] of Object.entries(DEFAULT_DEVELOPERS)) {
-        const { lastId } = await run(db, 'INSERT INTO developers (name) VALUES (?)', [dev]);
-        for (const p of projects) await run(db, 'INSERT INTO projects (name, developer_id) VALUES (?, ?)', [p, lastId]);
+        const { lastId } = run(db, 'INSERT INTO developers (name) VALUES (?)', [dev]);
+        for (const p of projects) run(db, 'INSERT INTO projects (name, developer_id) VALUES (?, ?)', [p, lastId]);
       }
-      for (const [name, color] of DEFAULT_TAGS) await run(db, 'INSERT INTO tags (name, color) VALUES (?, ?)', [name, color]);
+      for (const [name, color] of DEFAULT_TAGS) run(db, 'INSERT INTO tags (name, color) VALUES (?, ?)', [name, color]);
     }
 
-    const existingTemplates = new Set((await all<{ key: string }>(db, 'SELECT key FROM offer_templates')).map((t) => t.key));
+    const existingTemplates = new Set(all<{ key: string }>(db, 'SELECT key FROM offer_templates').map((t) => t.key));
     for (const t of DEFAULT_TEMPLATES) {
       if (existingTemplates.has(t.key)) continue;
-      await run(
+      run(
         db,
         `INSERT INTO offer_templates (key, name, description, header, unit_block, separator, footer, include_owner)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

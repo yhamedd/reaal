@@ -80,8 +80,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 type Section = keyof AppSettings;
 
-export async function getSettings(db: DB): Promise<AppSettings> {
-  const rows = await all<{ key: string; value: string }>(db, 'SELECT key, value FROM settings');
+export function getSettings(db: DB): AppSettings {
+  const rows = all<{ key: string; value: string }>(db, 'SELECT key, value FROM settings');
   const stored: Record<string, any> = {};
   for (const r of rows) {
     try {
@@ -97,8 +97,8 @@ export async function getSettings(db: DB): Promise<AppSettings> {
   return out as AppSettings;
 }
 
-export async function updateSettings(db: DB, patch: Partial<{ [K in Section]: Partial<AppSettings[K]> }>): Promise<AppSettings> {
-  const current = await getSettings(db);
+export function updateSettings(db: DB, patch: Partial<{ [K in Section]: Partial<AppSettings[K]> }>): AppSettings {
+  const current = getSettings(db);
   for (const section of Object.keys(patch) as Section[]) {
     if (!(section in DEFAULT_SETTINGS)) continue;
     const defaults = DEFAULT_SETTINGS[section] as Record<string, unknown>;
@@ -111,14 +111,14 @@ export async function updateSettings(db: DB, patch: Partial<{ [K in Section]: Pa
       else if (expected === 'boolean') merged[k] = Boolean(v);
       else if (expected === 'string') merged[k] = String(v ?? '');
     }
-    await run(db, 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
+    run(db, 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
       section,
       JSON.stringify(merged),
     ]);
   }
-  return await getSettings(db);
+  return getSettings(db);
 }
 
-export async function settingExists(db: DB, key: string): Promise<boolean> {
-  return !!await get(db, 'SELECT 1 FROM settings WHERE key = ?', [key]);
+export function settingExists(db: DB, key: string): boolean {
+  return !!get(db, 'SELECT 1 FROM settings WHERE key = ?', [key]);
 }

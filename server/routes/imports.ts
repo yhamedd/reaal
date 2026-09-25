@@ -9,13 +9,13 @@ import { logActivity } from '../activity.js';
 
 export const importsRouter = Router();
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: (process.env.VERCEL ? 4 : 25) * 1024 * 1024, files: 1 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
 const MAX_ROWS = 20000;
 
 const kindOf = (v: unknown): ImportKind => (v === 'owners' ? 'owners' : 'inventory');
 
-importsRouter.get('/', requirePermission('imports.run'), async (req, res) => {
-  const rows = await all<any>(
+importsRouter.get('/', requirePermission('imports.run'), (req, res) => {
+  const rows = all<any>(
     req.db,
     `SELECT i.id, i.filename, i.kind, i.status, i.summary, i.result, i.created_at, i.completed_at, u.name AS user_name
        FROM imports i LEFT JOIN users u ON u.id = i.user_id ORDER BY i.created_at DESC, i.id DESC LIMIT 100`,
@@ -50,7 +50,7 @@ importsRouter.post('/', requirePermission('imports.run'), upload.single('file'),
   if (!parsed.headers.length || !parsed.rows.length) throw new HttpError(400, 'The file has no data rows');
   if (parsed.rows.length > MAX_ROWS) throw new HttpError(400, `The file has ${parsed.rows.length} rows; the limit per import is ${MAX_ROWS}. Split it into smaller files.`);
   const mapping = suggestMapping(parsed.headers, kind);
-  const { lastId } = await run(req.db, 'INSERT INTO imports (user_id, filename, kind, headers, rows, mapping) VALUES (?, ?, ?, ?, ?, ?)', [
+  const { lastId } = run(req.db, 'INSERT INTO imports (user_id, filename, kind, headers, rows, mapping) VALUES (?, ?, ?, ?, ?, ?)', [
     req.user!.id,
     file.originalname.slice(0, 200),
     kind,
@@ -61,14 +61,14 @@ importsRouter.post('/', requirePermission('imports.run'), upload.single('file'),
   res.status(201).json({ id: lastId, kind, filename: file.originalname, headers: parsed.headers, total: parsed.rows.length, preview: parsed.rows.slice(0, 25), mapping, fields: fieldsFor(kind) });
 });
 
-async function loadImport(db: import('../db.js').DB, id: number) {
-  const imp = await get<any>(db, 'SELECT * FROM imports WHERE id = ?', [id]);
+function loadImport(db: import('../db.js').DB, id: number) {
+  const imp = get<any>(db, 'SELECT * FROM imports WHERE id = ?', [id]);
   if (!imp) throw new HttpError(404, 'Import not found');
   return imp;
 }
 
-importsRouter.get('/:id', requirePermission('imports.run'), async (req, res) => {
-  const imp = await loadImport(req.db, intParam(req.params.id));
+importsRouter.get('/:id', requirePermission('imports.run'), (req, res) => {
+  const imp = loadImport(req.db, intParam(req.params.id));
   const rows = JSON.parse(imp.rows);
   res.json({
     id: imp.id,
@@ -85,15 +85,15 @@ importsRouter.get('/:id', requirePermission('imports.run'), async (req, res) => 
   });
 });
 
-async function runValidation(db: import('../db.js').DB, imp: any, mapping: Record<string, string>) {
+function runValidation(db: import('../db.js').DB, imp: any, mapping: Record<string, string>) {
   const headers: string[] = JSON.parse(imp.headers);
   const rows = JSON.parse(imp.rows);
-  return await validateRows(db, imp.kind, headers, rows, mapping);
+  return validateRows(db, imp.kind, headers, rows, mapping);
 }
 
-importsRouter.post('/:id/validate', requirePermission('imports.run'), async (req, res) => {
+importsRouter.post('/:id/validate', requirePermission('imports.run'), (req, res) => {
   const db = req.db;
-  const imp = await loadImport(db, intParam(req.params.id));
+  const imp = loadImport(db, intParam(req.params.id));
   if (imp.status === 'completed') throw new HttpError(400, 'This import has already been completed');
   const mapping: Record<string, string> = req.body?.mapping && typeof req.body.mapping === 'object' ? req.body.mapping : JSON.parse(imp.mapping || '{}');
   // A target field may only be mapped once
@@ -104,32 +104,32 @@ importsRouter.post('/:id/validate', requirePermission('imports.run'), async (req
     seen.add(t);
     if (!JSON.parse(imp.headers).includes(h)) delete mapping[h];
   }
-  const { summary, results } = await runValidation(db, imp, mapping);
-  await run(db, "UPDATE imports SET mapping = ?, summary = ?, status = 'validated' WHERE id = ?", [JSON.stringify(mapping), JSON.stringify(summary), imp.id]);
+  const { summary, results } = runValidation(db, imp, mapping);
+  run(db, "UPDATE imports SET mapping = ?, summary = ?, status = 'validated' WHERE id = ?", [JSON.stringify(mapping), JSON.stringify(summary), imp.id]);
   const problems = results.filter((r) => r.status !== 'ready' || r.warnings.length);
   res.json({ summary, rows: problems.slice(0, 1000), ready_sample: results.filter((r) => r.status === 'ready').slice(0, 10) });
 });
 
-importsRouter.post('/:id/confirm', requirePermission('imports.run'), async (req, res) => {
+importsRouter.post('/:id/confirm', requirePermission('imports.run'), (req, res) => {
   const db = req.db;
-  const imp = await loadImport(db, intParam(req.params.id));
+  const imp = loadImport(db, intParam(req.params.id));
   if (imp.status === 'completed') throw new HttpError(400, 'This import has already been completed');
   if (imp.status !== 'validated') throw new HttpError(400, 'Validate the import before confirming');
   const policy: DuplicatePolicy = ['skip', 'create', 'update'].includes(req.body?.duplicates) ? req.body.duplicates : 'skip';
   const mapping = JSON.parse(imp.mapping || '{}');
   // Validate again so the import reflects the database at confirmation time.
-  const { summary, results } = await runValidation(db, imp, mapping);
+  const { summary, results } = runValidation(db, imp, mapping);
   if (summary.missing_required.length) throw new HttpError(400, `Map the required columns first: ${summary.missing_required.join(', ')}`);
-  const counts = await executeImport(db, req.user!, imp.id, imp.kind, results as RowResult[], policy, imp.filename);
-  await run(db, 'UPDATE imports SET summary = ? WHERE id = ?', [JSON.stringify(summary), imp.id]);
+  const counts = executeImport(db, req.user!, imp.id, imp.kind, results as RowResult[], policy, imp.filename);
+  run(db, 'UPDATE imports SET summary = ? WHERE id = ?', [JSON.stringify(summary), imp.id]);
   res.json({ ok: true, result: counts, summary });
 });
 
-importsRouter.delete('/:id', requirePermission('imports.run'), async (req, res) => {
+importsRouter.delete('/:id', requirePermission('imports.run'), (req, res) => {
   const db = req.db;
-  const imp = await loadImport(db, intParam(req.params.id));
+  const imp = loadImport(db, intParam(req.params.id));
   if (imp.status === 'completed') throw new HttpError(400, 'Completed imports stay in the history');
-  await run(db, 'DELETE FROM imports WHERE id = ?', [imp.id]);
-  await logActivity(db, { userId: req.user!.id, action: 'import_cancelled', entityType: 'import', entityId: imp.id, label: imp.filename, message: `cancelled the import of ${imp.filename}` });
+  run(db, 'DELETE FROM imports WHERE id = ?', [imp.id]);
+  logActivity(db, { userId: req.user!.id, action: 'import_cancelled', entityType: 'import', entityId: imp.id, label: imp.filename, message: `cancelled the import of ${imp.filename}` });
   res.json({ ok: true });
 });

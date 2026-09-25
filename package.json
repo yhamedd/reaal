@@ -9,17 +9,15 @@
     "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
-    "start": "NODE_ENV=production node --env-file-if-exists=.env dist-server/server/index.js",
+    "start": "NODE_ENV=production node --env-file-if-exists=.env --disable-warning=ExperimentalWarning dist-server/server/index.js",
     "seed": "tsx --env-file-if-exists=.env server/seed-cli.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run"
   },
   "engines": {
-    "node": ">=22.9"
+    "node": ">=22.13"
   },
   "dependencies": {
-    "@libsql/client": "^0.18.0",
-    "@vercel/blob": "^2.8.0",
     "cookie-parser": "^1.4.7",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
