@@ -1,12 +1,16 @@
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { createClient, type Client, type InValue, type Transaction } from '@libsql/client';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export type DB = DatabaseSync;
-export type Params = Record<string, SQLInputValue> | SQLInputValue[];
+/**
+ * Database handle: either the client or an open transaction. Both expose
+ * execute(), so helpers accept either and code inside tx() transparently
+ * runs on the transaction.
+ */
+export type DB = (Client | Transaction) & { __tx?: boolean };
+export type Params = unknown[];
 
 const SCHEMA = `
-PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS roles (
   id INTEGER PRIMARY KEY,
@@ -308,45 +312,70 @@ CREATE TABLE IF NOT EXISTS imports (
 );
 `;
 
-export function openDb(file: string): DB {
-  if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new DatabaseSync(file);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA busy_timeout = 5000;');
-  db.exec(SCHEMA);
-  return db;
+export interface OpenOptions {
+  url: string;
+  authToken?: string;
 }
 
-export function all<T = any>(db: DB, sql: string, params: Params = []): T[] {
-  const stmt = db.prepare(sql);
-  return (Array.isArray(params) ? stmt.all(...params) : stmt.all(params)) as T[];
+/**
+ * Opens a local file (file:./data/reaal.db), an in-memory database (:memory:)
+ * or a remote Turso/libSQL database (libsql://…), then applies the schema.
+ */
+export async function openDb(opts: OpenOptions | string): Promise<Client> {
+  const o = typeof opts === 'string' ? { url: opts } : opts;
+  let url = o.url;
+  if (url !== ':memory:' && !/^[a-z]+:/i.test(url)) url = `file:${url}`;
+  if (url.startsWith('file:')) fs.mkdirSync(path.dirname(url.slice(5)), { recursive: true });
+  const client = createClient({ url, authToken: o.authToken, intMode: 'number' });
+  if (url.startsWith('file:')) {
+    await client.execute('PRAGMA journal_mode = WAL');
+    await client.execute('PRAGMA busy_timeout = 5000');
+  }
+  await client.execute('PRAGMA foreign_keys = ON');
+  await client.executeMultiple(SCHEMA);
+  return client;
 }
 
-export function get<T = any>(db: DB, sql: string, params: Params = []): T | undefined {
-  const stmt = db.prepare(sql);
-  return (Array.isArray(params) ? stmt.get(...params) : stmt.get(params)) as T | undefined;
+function args(params: Params): InValue[] {
+  return params.map((v) => (v === undefined ? null : typeof v === 'boolean' ? (v ? 1 : 0) : (v as InValue)));
 }
 
-export function run(db: DB, sql: string, params: Params = []) {
-  const stmt = db.prepare(sql);
-  const r = Array.isArray(params) ? stmt.run(...params) : stmt.run(params);
-  return { changes: Number(r.changes), lastId: Number(r.lastInsertRowid) };
+export async function all<T = any>(db: DB, sql: string, params: Params = []): Promise<T[]> {
+  const rs = await db.execute({ sql, args: args(params) });
+  return rs.rows.map((r) => {
+    const o: Record<string, unknown> = {};
+    rs.columns.forEach((c, i) => (o[c] = r[i]));
+    return o as T;
+  });
 }
 
-let txDepth = 0;
-export function tx<T>(db: DB, fn: () => T): T {
-  if (txDepth > 0) return fn();
-  db.exec('BEGIN');
-  txDepth++;
+export async function get<T = any>(db: DB, sql: string, params: Params = []): Promise<T | undefined> {
+  return (await all<T>(db, sql, params))[0];
+}
+
+export async function run(db: DB, sql: string, params: Params = []) {
+  const rs = await db.execute({ sql, args: args(params) });
+  return { changes: rs.rowsAffected, lastId: Number(rs.lastInsertRowid ?? 0) };
+}
+
+/** Runs fn inside a write transaction; nested calls reuse the outer transaction. */
+export async function tx<T>(db: DB, fn: (db: DB) => Promise<T>): Promise<T> {
+  if (db.__tx) return fn(db);
+  const t = (await (db as Client).transaction('write')) as DB;
+  t.__tx = true;
   try {
-    const result = fn();
-    db.exec('COMMIT');
+    const result = await fn(t);
+    await (t as Transaction).commit();
     return result;
   } catch (e) {
-    db.exec('ROLLBACK');
+    try {
+      await (t as Transaction).rollback();
+    } catch {
+      /* already closed */
+    }
     throw e;
   } finally {
-    txDepth--;
+    (t as Transaction).close();
   }
 }
 

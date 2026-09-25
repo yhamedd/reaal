@@ -13,7 +13,7 @@ export const searchRouter = Router();
  * Universal search across owners, units, requirements and team members.
  * Phone numbers match regardless of formatting (+20, spaces, dashes).
  */
-searchRouter.get('/', requireAuth, (req, res) => {
+searchRouter.get('/', requireAuth, async (req, res) => {
   const db = req.db;
   const q = String(req.query.q ?? '').trim();
   if (q.length < 2) return res.json({ owners: [], units: [], requirements: [], users: [] });
@@ -30,7 +30,7 @@ searchRouter.get('/', requireAuth, (req, res) => {
     const params: any[] = [like, like];
     if (phoneClause) params.push(phoneLike, phoneLike, phoneLike);
     params.push(code ? Number(code[1]) : -1);
-    out.owners = all<any>(
+    out.owners = (await all<any>(
       db,
       `SELECT o.id, o.name, o.primary_phone, o.email, o.status,
               (SELECT COUNT(*) FROM units u WHERE u.owner_id = o.id AND u.archived_at IS NULL) AS unit_count
@@ -38,7 +38,7 @@ searchRouter.get('/', requireAuth, (req, res) => {
         WHERE o.name LIKE ? ESCAPE '\\' OR o.email LIKE ? ESCAPE '\\' ${phoneClause} OR o.id = ?
         ORDER BY (o.status = 'Archived'), o.name COLLATE NOCASE LIMIT 8`,
       params,
-    ).map((o) => redactOwner(req.user, { ...o, code: ownerCode(o.id) }));
+    )).map((o) => redactOwner(req.user, { ...o, code: ownerCode(o.id) }));
   }
 
   if (can(req.user, 'inventory.view')) {
@@ -56,7 +56,7 @@ searchRouter.get('/', requireAuth, (req, res) => {
     const ownerPhone = looksLikePhone && canContact && can(req.user, 'owners.view') ? 'OR o.primary_phone_norm LIKE ?' : '';
     if (ownerPhone) params.push(phoneLike);
     params.push(code ? Number(code[1]) : -1);
-    out.units = all<any>(
+    out.units = (await all<any>(
       db,
       `SELECT u.id, u.unit_number, u.phase, u.property_type, u.asking_price, u.status, u.bua, u.bedrooms, u.owner_id,
               p.name AS project, d.name AS developer, o.name AS owner_name, a.name AS agent_name
@@ -67,21 +67,21 @@ searchRouter.get('/', requireAuth, (req, res) => {
               OR u.property_type LIKE ? ESCAPE '\\' OR a.name LIKE ? ESCAPE '\\' OR u.unit_number_norm LIKE ? ${wordClause} ${ownerPhone} OR u.id = ?)
         ORDER BY u.updated_at DESC LIMIT 8`,
       params,
-    ).map((u) => presentUnit(req.user, { ...u, code: unitCode(u.id) }));
+    )).map((u) => presentUnit(req.user, { ...u, code: unitCode(u.id) }));
   }
 
   if (can(req.user, 'requirements.view')) {
     const phoneClause = looksLikePhone && canContact ? 'OR r.phone_norm LIKE ?' : '';
     const params: any[] = [like];
     if (phoneClause) params.push(phoneLike);
-    out.requirements = all<any>(
+    out.requirements = (await all<any>(
       db,
       `SELECT r.id, r.client_name, r.status, r.priority, r.min_price, r.max_price FROM requirements r
         WHERE r.archived_at IS NULL AND (r.client_name LIKE ? ESCAPE '\\' ${phoneClause}) ORDER BY r.updated_at DESC LIMIT 5`,
       params,
-    ).map((r) => ({ ...r, code: requirementCode(r.id) }));
+    )).map((r) => ({ ...r, code: requirementCode(r.id) }));
   }
 
-  out.users = all<any>(db, "SELECT id, name, email FROM users WHERE status = 'active' AND name LIKE ? ESCAPE '\\' LIMIT 3", [like]);
+  out.users = await all<any>(db, "SELECT id, name, email FROM users WHERE status = 'active' AND name LIKE ? ESCAPE '\\' LIMIT 3", [like]);
   res.json(out);
 });

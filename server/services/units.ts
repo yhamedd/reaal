@@ -236,18 +236,18 @@ export function parseSort(raw: unknown): SortSpec[] {
   }
 }
 
-export function getUnitRow(db: DB, id: number) {
-  return get<any>(db, `${UNIT_SELECT} WHERE u.id = ?`, [id]);
+export async function getUnitRow(db: DB, id: number) {
+  return await get<any>(db, `${UNIT_SELECT} WHERE u.id = ?`, [id]);
 }
 
-export function findUnitDuplicates(
+export async function findUnitDuplicates(
   db: DB,
   { project_id, unit_number, phase }: { project_id?: number | null; unit_number?: string | null; phase?: string | null },
   excludeId?: number,
 ) {
   const norm = normalizeUnitNumber(unit_number);
   if (!project_id || !norm) return [];
-  const rows = all<any>(
+  const rows = await all<any>(
     db,
     `${UNIT_SELECT} WHERE u.project_id = ? AND u.unit_number_norm = ? AND u.id <> ? AND u.archived_at IS NULL`,
     [project_id, norm, excludeId ?? 0],

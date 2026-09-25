@@ -4,11 +4,11 @@ import { get, run } from '../db.js';
 import { setup, projectId, type Client } from './helpers.js';
 import { runVerificationCheck } from '../jobs.js';
 
-let ctx: ReturnType<typeof setup>;
+let ctx: Awaited<ReturnType<typeof setup>>;
 let admin: Client;
 
 beforeEach(async () => {
-  ctx = setup();
+  ctx = await setup();
   admin = await ctx.login('admin@test.local', 'Admin12345');
 });
 
@@ -36,7 +36,7 @@ describe('authentication', () => {
   });
 
   it('locks an account after repeated failures', async () => {
-    ctx.addUser('Agent A', 'a@test.local', 'agent');
+    await ctx.addUser('Agent A', 'a@test.local', 'agent');
     const st = (await import('supertest')).default;
     for (let i = 0; i < 4; i++) {
       const r = await st(ctx.app).post('/api/auth/login').set('X-Requested-With', 'reaal').send({ email: 'a@test.local', password: 'wrong' });
@@ -49,7 +49,7 @@ describe('authentication', () => {
   });
 
   it('blocks disabled accounts and ends their sessions', async () => {
-    const id = ctx.addUser('Agent B', 'b@test.local', 'agent');
+    const id = await ctx.addUser('Agent B', 'b@test.local', 'agent');
     const agent = await ctx.login('b@test.local', 'Password123');
     expect((await agent.get('/api/auth/me')).status).toBe(200);
     expect((await admin.patch(`/api/users/${id}`, { status: 'disabled' })).status).toBe(200);
@@ -57,16 +57,16 @@ describe('authentication', () => {
   });
 
   it('expires idle sessions', async () => {
-    const id = ctx.addUser('Agent C', 'c@test.local', 'agent');
+    const id = await ctx.addUser('Agent C', 'c@test.local', 'agent');
     const agent = await ctx.login('c@test.local', 'Password123');
-    run(ctx.db, "UPDATE sessions SET last_seen = datetime('now', '-2 hours') WHERE user_id = ?", [id]);
+    await run(ctx.db, "UPDATE sessions SET last_seen = datetime('now', '-2 hours') WHERE user_id = ?", [id]);
     const r = await agent.get('/api/auth/me');
     expect(r.status).toBe(401);
     expect(r.headers['x-session-expired']).toBe('inactivity');
   });
 
   it('supports admin-issued reset links', async () => {
-    const id = ctx.addUser('Agent D', 'd@test.local', 'agent');
+    const id = await ctx.addUser('Agent D', 'd@test.local', 'agent');
     const r = await admin.post(`/api/users/${id}/reset-password`, { mode: 'link' });
     const token = new URL('http://x' + r.body.reset_path).searchParams.get('token')!;
     const st = (await import('supertest')).default;
@@ -78,7 +78,7 @@ describe('authentication', () => {
   });
 
   it('forces temporary passwords to be changed', async () => {
-    const res = await admin.post('/api/users', { name: 'New Agent', email: 'new@test.local', role_id: get<any>(ctx.db, "SELECT id FROM roles WHERE key='agent'").id });
+    const res = await admin.post('/api/users', { name: 'New Agent', email: 'new@test.local', role_id: (await get<any>(ctx.db, "SELECT id FROM roles WHERE key='agent'")).id });
     const agent = await ctx.login('new@test.local', res.body.temporary_password);
     expect((await agent.get('/api/units')).status).toBe(428);
     expect((await agent.post('/api/auth/change-password', { current_password: res.body.temporary_password, new_password: 'MyPass1234' })).status).toBe(200);
@@ -88,7 +88,7 @@ describe('authentication', () => {
 
 describe('permissions', () => {
   it('agents cannot export or manage users by default', async () => {
-    ctx.addUser('Agent', 'agent@test.local', 'agent');
+    await ctx.addUser('Agent', 'agent@test.local', 'agent');
     const agent = await ctx.login('agent@test.local', 'Password123');
     expect((await agent.get('/api/export/units')).status).toBe(403);
     expect((await agent.get('/api/users')).status).toBe(403);
@@ -96,8 +96,8 @@ describe('permissions', () => {
   });
 
   it('permissions are configurable per role', async () => {
-    ctx.addUser('Agent', 'agent@test.local', 'agent');
-    const agentRole = get<any>(ctx.db, "SELECT * FROM roles WHERE key='agent'");
+    await ctx.addUser('Agent', 'agent@test.local', 'agent');
+    const agentRole = await get<any>(ctx.db, "SELECT * FROM roles WHERE key='agent'");
     const perms = [...JSON.parse(agentRole.permissions), 'inventory.export'];
     expect((await admin.patch(`/api/roles/${agentRole.id}`, { permissions: perms })).status).toBe(200);
     const agent = await ctx.login('agent@test.local', 'Password123');
@@ -106,10 +106,10 @@ describe('permissions', () => {
 
   it('masks owner contact details without owners.contact', async () => {
     await createOwner(admin, { name: 'Ahmed Mohamed', primary_phone: '01012345678' });
-    const role = get<any>(ctx.db, "SELECT * FROM roles WHERE key='agent'");
+    const role = await get<any>(ctx.db, "SELECT * FROM roles WHERE key='agent'");
     const perms = JSON.parse(role.permissions).filter((p: string) => p !== 'owners.contact');
-    run(ctx.db, 'UPDATE roles SET permissions = ? WHERE id = ?', [JSON.stringify(perms), role.id]);
-    ctx.addUser('Agent', 'agent@test.local', 'agent');
+    await run(ctx.db, 'UPDATE roles SET permissions = ? WHERE id = ?', [JSON.stringify(perms), role.id]);
+    await ctx.addUser('Agent', 'agent@test.local', 'agent');
     const agent = await ctx.login('agent@test.local', 'Password123');
     const list = await agent.get('/api/owners');
     expect(list.body.rows[0].primary_phone).not.toBe('01012345678');
@@ -117,11 +117,11 @@ describe('permissions', () => {
   });
 
   it('managers cannot modify super admin accounts', async () => {
-    ctx.addUser('Manager', 'm@test.local', 'admin');
+    await ctx.addUser('Manager', 'm@test.local', 'admin');
     const mgr = await ctx.login('m@test.local', 'Password123');
-    const adminId = get<any>(ctx.db, "SELECT id FROM users WHERE email='admin@test.local'").id;
+    const adminId = (await get<any>(ctx.db, "SELECT id FROM users WHERE email='admin@test.local'")).id;
     expect((await mgr.patch(`/api/users/${adminId}`, { status: 'disabled' })).status).toBe(403);
-    const superRole = get<any>(ctx.db, "SELECT id FROM roles WHERE key='super_admin'").id;
+    const superRole = (await get<any>(ctx.db, "SELECT id FROM roles WHERE key='super_admin'")).id;
     expect((await mgr.post('/api/users', { name: 'X', email: 'x@test.local', role_id: superRole })).status).toBe(403);
   });
 });
@@ -129,7 +129,7 @@ describe('permissions', () => {
 describe('owners and search', () => {
   it('finds owners by phone regardless of formatting', async () => {
     const id = await createOwner(admin, { name: 'Ahmed Mohamed', primary_phone: '+20 101 234 5678' });
-    await createUnit(admin, { owner_id: id, project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12', property_type: 'villa' });
+    await createUnit(admin, { owner_id: id, project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12', property_type: 'villa' });
     const res = await admin.get('/api/search?q=01012345678');
     expect(res.body.owners).toHaveLength(1);
     expect(res.body.owners[0].name).toBe('Ahmed Mohamed');
@@ -145,13 +145,13 @@ describe('owners and search', () => {
     expect(dup.body.duplicates[0].reasons).toContain('Same phone number');
     const forced = await admin.post('/api/owners', { name: 'A. Mohamed', primary_phone: '0020 10 1234 5678', confirm_duplicate: true });
     expect(forced.status).toBe(201);
-    expect(get(ctx.db, "SELECT 1 FROM activity WHERE action = 'duplicate_acknowledged'")).toBeTruthy();
+    expect(await get(ctx.db, "SELECT 1 FROM activity WHERE action = 'duplicate_acknowledged'")).toBeTruthy();
   });
 
   it('owner profile lists owned units', async () => {
     const id = await createOwner(admin, { name: 'Owner', primary_phone: '01011111111' });
-    await createUnit(admin, { owner_id: id, project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
-    await createUnit(admin, { owner_id: id, project_id: projectId(ctx.db, 'Marassi'), unit_number: 'V81' });
+    await createUnit(admin, { owner_id: id, project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
+    await createUnit(admin, { owner_id: id, project_id: await projectId(ctx.db, 'Marassi'), unit_number: 'V81' });
     const res = await admin.get(`/api/owners/${id}`);
     expect(res.body.units.map((u: any) => u.project).sort()).toEqual(['Marassi', 'Mivida']);
   });
@@ -159,7 +159,7 @@ describe('owners and search', () => {
 
 describe('inventory', () => {
   it('fills developer from project and canonicalises master values', async () => {
-    const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'a-12', property_type: 'VILLA', asking_price: '42M' });
+    const id = await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'a-12', property_type: 'VILLA', asking_price: '42M' });
     const u = (await admin.get(`/api/units/${id}`)).body;
     expect(u.developer).toBe('Emaar');
     expect(u.property_type).toBe('Villa');
@@ -167,7 +167,7 @@ describe('inventory', () => {
   });
 
   it('flags project/unit duplicates, allowing an acknowledged create', async () => {
-    const p = projectId(ctx.db, 'Mivida');
+    const p = await projectId(ctx.db, 'Mivida');
     await createUnit(admin, { project_id: p, unit_number: 'A12' });
     const dup = await admin.post('/api/units', { project_id: p, unit_number: 'a 12' });
     expect(dup.status).toBe(409);
@@ -176,13 +176,13 @@ describe('inventory', () => {
   });
 
   it('creates a new owner together with a unit', async () => {
-    const res = await admin.post('/api/units', { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'B1', new_owner: { name: 'Fresh Owner', primary_phone: '01234567890' } });
+    const res = await admin.post('/api/units', { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'B1', new_owner: { name: 'Fresh Owner', primary_phone: '01234567890' } });
     expect(res.status).toBe(201);
     expect(res.body.owner_id).toBeTruthy();
   });
 
   it('filters combinations of criteria', async () => {
-    const mivida = projectId(ctx.db, 'Mivida');
+    const mivida = await projectId(ctx.db, 'Mivida');
     await createUnit(admin, { project_id: mivida, unit_number: 'A1', property_type: 'Villa', bedrooms: 4, asking_price: 42e6, bua: 350 });
     await createUnit(admin, { project_id: mivida, unit_number: 'A2', property_type: 'Villa', bedrooms: 3, asking_price: 42e6, bua: 350 });
     await createUnit(admin, { project_id: mivida, unit_number: 'A3', property_type: 'Villa', bedrooms: 5, asking_price: 60e6, bua: 400 });
@@ -193,15 +193,15 @@ describe('inventory', () => {
   });
 
   it('searches "Mivida A12" across project and unit number', async () => {
-    await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
-    await createUnit(admin, { project_id: projectId(ctx.db, 'Marassi'), unit_number: 'A12' });
+    await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
+    await createUnit(admin, { project_id: await projectId(ctx.db, 'Marassi'), unit_number: 'A12' });
     const res = await admin.get(`/api/units?filters=${encodeURIComponent(JSON.stringify({ q: 'Mivida A12' }))}`);
     expect(res.body.rows).toHaveLength(1);
     expect(res.body.rows[0].project).toBe('Mivida');
   });
 
   it('logs field changes including price and status', async () => {
-    const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12', asking_price: 40e6 });
+    const id = await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12', asking_price: 40e6 });
     await admin.patch(`/api/units/${id}`, { asking_price: 42e6 });
     await admin.patch(`/api/units/${id}`, { status: 'Sold' });
     const log = (await admin.get(`/api/activity?entity_type=unit&entity_id=${id}`)).body.rows;
@@ -214,14 +214,14 @@ describe('inventory', () => {
   });
 
   it('rejects invalid inline values with a field error', async () => {
-    const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
+    const id = await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
     const res = await admin.patch(`/api/units/${id}`, { bua: 'large' });
     expect(res.status).toBe(400);
     expect(res.body.fields.bua).toBeTruthy();
   });
 
   it('bulk updates and verifies', async () => {
-    const p = projectId(ctx.db, 'Mivida');
+    const p = await projectId(ctx.db, 'Mivida');
     const a = await createUnit(admin, { project_id: p, unit_number: 'A1' });
     const b = await createUnit(admin, { project_id: p, unit_number: 'A2' });
     expect((await admin.post('/api/units/bulk', { ids: [a, b], patch: { status: 'Reserved' } })).status).toBe(200);
@@ -231,7 +231,7 @@ describe('inventory', () => {
   });
 
   it('archives rather than deleting, and purge needs confirmation', async () => {
-    const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
+    const id = await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
     expect((await admin.delete(`/api/units/${id}`, { confirm: 'U-00001' })).status).toBe(400); // not archived yet
     await admin.post(`/api/units/${id}/archive`);
     expect((await admin.get('/api/units')).body.total).toBe(0);
@@ -240,25 +240,25 @@ describe('inventory', () => {
   });
 
   it('agents cannot purge', async () => {
-    ctx.addUser('Agent', 'agent@test.local', 'agent');
+    await ctx.addUser('Agent', 'agent@test.local', 'agent');
     const agent = await ctx.login('agent@test.local', 'Password123');
-    const id = await createUnit(agent, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
+    const id = await createUnit(agent, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
     expect((await agent.post(`/api/units/${id}/archive`)).status).toBe(403);
     expect((await agent.patch(`/api/units/${id}`, { status: 'Archived' })).status).toBe(403);
   });
 
   it('notifies agents about stale verification once per level', async () => {
-    const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12', last_verified: '2020-01-01' });
-    expect(runVerificationCheck(ctx.db)).toBe(1);
-    expect(runVerificationCheck(ctx.db)).toBe(0);
+    const id = await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12', last_verified: '2020-01-01' });
+    expect(await runVerificationCheck(ctx.db)).toBe(1);
+    expect(await runVerificationCheck(ctx.db)).toBe(0);
     await admin.post('/api/units/verify', { ids: [id] });
-    expect(runVerificationCheck(ctx.db)).toBe(0);
+    expect(await runVerificationCheck(ctx.db)).toBe(0);
   });
 });
 
 describe('requirements, matching and offers', () => {
   it('matches only suitable inventory and supports manual removal', async () => {
-    const mivida = projectId(ctx.db, 'Mivida');
+    const mivida = await projectId(ctx.db, 'Mivida');
     const good = await createUnit(admin, { project_id: mivida, unit_number: 'A12', property_type: 'Villa', bedrooms: 4, bua: 350, asking_price: 42e6 });
     const alsoGood = await createUnit(admin, { project_id: mivida, unit_number: 'C21', property_type: 'Villa', bedrooms: 5, bua: 380, asking_price: 45e6 });
     await createUnit(admin, { project_id: mivida, unit_number: 'B18', property_type: 'Villa', bedrooms: 4, bua: 350, asking_price: 42e6, status: 'Sold' });
@@ -274,17 +274,17 @@ describe('requirements, matching and offers', () => {
   });
 
   it('notifies the requirement agent when a new matching unit appears', async () => {
-    const agentId = ctx.addUser('Sarah', 'sarah@test.local', 'agent');
-    const mivida = projectId(ctx.db, 'Mivida');
+    const agentId = await ctx.addUser('Sarah', 'sarah@test.local', 'agent');
+    const mivida = await projectId(ctx.db, 'Mivida');
     await admin.post('/api/requirements', { client_name: 'Karim', preferred_project_ids: [mivida], assigned_user_id: agentId });
     await createUnit(admin, { project_id: mivida, unit_number: 'Z9' });
-    const n = get<any>(ctx.db, "SELECT * FROM notifications WHERE user_id = ? AND type = 'match'", [agentId]);
+    const n = await get<any>(ctx.db, "SELECT * FROM notifications WHERE user_id = ? AND type = 'match'", [agentId]);
     expect(n.message).toContain('Mivida Z9');
   });
 
   it('generates, saves and lists a multi-unit offer without editing the database', async () => {
     const owner = await createOwner(admin, { name: 'Ahmed Mohamed', primary_phone: '01012345678' });
-    const mivida = projectId(ctx.db, 'Mivida');
+    const mivida = await projectId(ctx.db, 'Mivida');
     const a = await createUnit(admin, { owner_id: owner, project_id: mivida, unit_number: 'A12', property_type: 'Standalone Villa', bua: 350, land_area: 500, bedrooms: 4, finishing: 'Fully Finished', asking_price: 42e6 });
     const b = await createUnit(admin, { owner_id: owner, project_id: mivida, unit_number: 'C21', property_type: 'Townhouse', bua: 250, asking_price: 30e6 });
     const gen = await admin.post('/api/offers/generate', { unit_ids: [a, b], template: 'whatsapp', client_name: 'Karim' });
@@ -310,7 +310,7 @@ describe('requirements, matching and offers', () => {
   });
 
   it('produces a PDF', async () => {
-    const a = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12', property_type: 'Villa', bua: 350, asking_price: 42e6 });
+    const a = await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12', property_type: 'Villa', bua: 350, asking_price: 42e6 });
     const res = await admin.raw.post('/api/offers/pdf').set('X-Requested-With', 'reaal').send({ unit_ids: [a] }).buffer(true).parse((r, cb) => {
       const chunks: Buffer[] = [];
       r.on('data', (c: Buffer) => chunks.push(c));
@@ -353,7 +353,7 @@ describe('files and media', () => {
       const raw = Buffer.from([0, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 0]);
       return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
     })();
-    const id = await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12', bua: 350, asking_price: 42e6 });
+    const id = await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12', bua: 350, asking_price: 42e6 });
     const up = await admin.upload('/api/files').field('entity_type', 'unit').field('entity_id', String(id)).field('category', 'image').attach('files', png, { filename: 'front.png', contentType: 'image/png' });
     expect(up.status, JSON.stringify(up.body)).toBe(201);
     const plan = await admin.upload('/api/files').field('entity_type', 'unit').field('entity_id', String(id)).field('category', 'floor_plan').attach('files', png, { filename: 'plan.png', contentType: 'image/png' });
@@ -372,9 +372,9 @@ describe('files and media', () => {
     expect((body.match(/\/Type \/Page\b/g) ?? []).length).toBe(2); // brochure page + floor plan page
     expect(body).toContain('/Subtype /Image');
     // Users without inventory access cannot fetch unit files
-    const role = run(ctx.db, "INSERT INTO roles (name, permissions) VALUES ('No inventory', '[]')").lastId;
-    const uid = ctx.addUser('Outsider', 'out@test.local', 'agent');
-    run(ctx.db, 'UPDATE users SET role_id = ? WHERE id = ?', [role, uid]);
+    const role = (await run(ctx.db, "INSERT INTO roles (name, permissions) VALUES ('No inventory', '[]')")).lastId;
+    const uid = await ctx.addUser('Outsider', 'out@test.local', 'agent');
+    await run(ctx.db, 'UPDATE users SET role_id = ? WHERE id = ?', [role, uid]);
     const outsider = await ctx.login('out@test.local', 'Password123');
     expect((await outsider.get(`/api/files/${up.body.ids[0]}`)).status).toBe(403);
   });
@@ -382,13 +382,13 @@ describe('files and media', () => {
 
 describe('notes and mentions', () => {
   it('stores notes and notifies mentioned users', async () => {
-    const sarah = ctx.addUser('Sarah Ali', 'sarah@test.local', 'agent');
+    const sarah = await ctx.addUser('Sarah Ali', 'sarah@test.local', 'agent');
     const owner = await createOwner(admin, { name: 'Owner', primary_phone: '01011111111' });
     const res = await admin.post('/api/notes', { entity_type: 'owner', entity_id: owner, content: 'Owner willing to negotiate slightly. Call after 5 PM. @Sarah Ali' });
     expect(res.status).toBe(201);
     const notes = (await admin.get(`/api/notes?entity_type=owner&entity_id=${owner}`)).body;
     expect(notes[0].author_name).toBe('Admin User');
-    expect(get(ctx.db, "SELECT 1 FROM notifications WHERE user_id = ? AND type = 'mention'", [sarah])).toBeTruthy();
+    expect(await get(ctx.db, "SELECT 1 FROM notifications WHERE user_id = ? AND type = 'mention'", [sarah])).toBeTruthy();
   });
 });
 
@@ -401,7 +401,7 @@ describe('import and export', () => {
   }
 
   it('runs the full upload → map → validate → confirm flow', async () => {
-    await createUnit(admin, { project_id: projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
+    await createUnit(admin, { project_id: await projectId(ctx.db, 'Mivida'), unit_number: 'A12' });
     const file = await xlsx([
       ['Client Name', 'Mobile', 'Compound', 'Unit', 'Type', 'BUA', 'Price', 'Random Column'],
       ['Ahmed Mohamed', '01012345678', 'Mivida', 'A12', 'Villa', '350', '42M', 'x'],
@@ -427,10 +427,10 @@ describe('import and export', () => {
     const done = await admin.post(`/api/imports/${up.body.id}/confirm`, { duplicates: 'skip' });
     expect(done.status).toBe(200);
     expect(done.body.result).toMatchObject({ created_units: 2, skipped: 1, errors: 2, created_owners: 1 });
-    const mona = get<any>(ctx.db, "SELECT COUNT(*) AS n FROM owners WHERE name = 'Mona Adel'");
+    const mona = await get<any>(ctx.db, "SELECT COUNT(*) AS n FROM owners WHERE name = 'Mona Adel'");
     expect(mona.n).toBe(1); // both of Mona's rows share one owner
-    expect(get<any>(ctx.db, "SELECT property_type FROM units WHERE unit_number = 'C21'").property_type).toBe('Townhouse');
-    expect(get(ctx.db, "SELECT 1 FROM projects WHERE name = 'New Compound'")).toBeTruthy();
+    expect((await get<any>(ctx.db, "SELECT property_type FROM units WHERE unit_number = 'C21'")).property_type).toBe('Townhouse');
+    expect(await get(ctx.db, "SELECT 1 FROM projects WHERE name = 'New Compound'")).toBeTruthy();
   });
 
   it('imports CSV owners and updates duplicates when asked', async () => {
@@ -442,11 +442,11 @@ describe('import and export', () => {
     expect(val.body.summary).toMatchObject({ ready: 1, duplicates: 1 });
     const done = await admin.post(`/api/imports/${up.body.id}/confirm`, { duplicates: 'update' });
     expect(done.body.result).toMatchObject({ created_owners: 1, updated_owners: 1 });
-    expect(get<any>(ctx.db, "SELECT email FROM owners WHERE name = 'Ahmed Mohamed'").email).toBe('ahmed@example.com');
+    expect((await get<any>(ctx.db, "SELECT email FROM owners WHERE name = 'Ahmed Mohamed'")).email).toBe('ahmed@example.com');
   });
 
   it('exports filtered inventory and logs the export', async () => {
-    const p = projectId(ctx.db, 'Mivida');
+    const p = await projectId(ctx.db, 'Mivida');
     await createUnit(admin, { project_id: p, unit_number: 'A1', status: 'Available' });
     await createUnit(admin, { project_id: p, unit_number: 'A2', status: 'Sold' });
     const res = await admin.get(`/api/export/units?format=csv&filters=${encodeURIComponent(JSON.stringify({ status: ['Sold'] }))}`);
@@ -454,7 +454,7 @@ describe('import and export', () => {
     const lines = res.text.trim().split('\n');
     expect(lines).toHaveLength(2);
     expect(lines[1]).toContain('A2');
-    const log = get<any>(ctx.db, "SELECT * FROM activity WHERE action = 'exported'");
+    const log = await get<any>(ctx.db, "SELECT * FROM activity WHERE action = 'exported'");
     expect(log.message).toContain('exported 1 inventory record (filtered inventory, CSV)');
   });
 
@@ -467,7 +467,7 @@ describe('import and export', () => {
 
 describe('saved views and settings', () => {
   it('shares views with the team', async () => {
-    ctx.addUser('Agent', 'agent@test.local', 'agent');
+    await ctx.addUser('Agent', 'agent@test.local', 'agent');
     await admin.post('/api/views', { name: 'Mivida Villas', shared: true, config: { filters: { property_types: ['Villa'] }, sort: [] } });
     await admin.post('/api/views', { name: 'Private', shared: false, config: { filters: {}, sort: [] } });
     const agent = await ctx.login('agent@test.local', 'Password123');
