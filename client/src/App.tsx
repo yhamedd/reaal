@@ -29,9 +29,20 @@ function Guard({ perm, children }: { perm?: string | string[]; children: ReactNo
 }
 
 export function App() {
-  const { me, loading } = useAuth();
+  const { me, loading, serverDown, refresh } = useAuth();
   const location = useLocation();
   if (loading) return <Loading />;
+  if (serverDown) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card stack">
+          <h1 style={{ fontSize: 18 }}>Can’t reach the server</h1>
+          <p className="text-2">The web app loaded but the API isn’t responding. Make sure the server is running (<code>npm run dev</code> starts both), then try again.</p>
+          <div><button className="btn primary" onClick={refresh}>Try again</button></div>
+        </div>
+      </div>
+    );
+  }
 
   if (!me) {
     return (

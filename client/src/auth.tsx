@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, onAuthProblem } from './api';
+import { api, ApiError, onAuthProblem } from './api';
 
 export interface Me {
   id: number;
@@ -22,6 +22,7 @@ interface AuthState {
   me: Me | null;
   loading: boolean;
   expiredReason: string | null;
+  serverDown: boolean;
   can: (perm: string) => boolean;
   refresh: () => Promise<void>;
   logout: (reason?: string) => Promise<void>;
@@ -33,11 +34,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [expiredReason, setExpiredReason] = useState<string | null>(null);
+  const [serverDown, setServerDown] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setMe(await api.get<Me>('/api/auth/me'));
-    } catch {
+      setServerDown(false);
+    } catch (e) {
+      // 401 means "not signed in"; anything else (network error, proxy 5xx) means the API isn't reachable.
+      setServerDown(!(e instanceof ApiError) || (e.status !== 401 && e.status !== 428));
       setMe(null);
     } finally {
       setLoading(false);
@@ -92,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const can = useCallback((perm: string) => !!me?.permissions.includes(perm), [me]);
 
-  return <AuthContext.Provider value={{ me, loading, expiredReason, can, refresh, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ me, loading, expiredReason, serverDown, can, refresh, logout }}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);

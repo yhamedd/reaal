@@ -8,7 +8,22 @@
     <title>Reaal</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="font-family:system-ui,sans-serif;max-width:520px;margin:15vh auto;padding:0 16px;color:#4a5160;line-height:1.5">
+        <strong style="color:#16191f">Loading Reaal…</strong>
+        <p id="boot-hint" style="display:none">
+          The app didn’t start. It has to be opened through its server, not as a file:
+          run <code>npm run dev</code> and open <a href="http://localhost:5173">http://localhost:5173</a>
+          (or <code>npm run build &amp;&amp; npm start</code> and open http://localhost:3000).
+        </p>
+      </div>
+    </div>
+    <script>
+      setTimeout(function () {
+        var h = document.getElementById('boot-hint');
+        if (h) h.style.display = 'block';
+      }, 4000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
+import { ErrorBoundary } from './ErrorBoundary';
 import { AuthProvider } from './auth';
 import { ConfirmProvider, ToastProvider } from './ui';
 import './styles.css';
@@ -15,6 +16,7 @@ try {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <ErrorBoundary>
     <BrowserRouter>
       <ToastProvider>
         <ConfirmProvider>
@@ -24,5 +26,6 @@ createRoot(document.getElementById('root')!).render(
         </ConfirmProvider>
       </ToastProvider>
     </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>,
 );
