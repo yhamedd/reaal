@@ -57,17 +57,29 @@ export function errorMessage(e: unknown): string {
 // Modal / Drawer
 // ---------------------------------------------------------------------------
 
+// Open modals/drawers form a stack; Escape closes only the topmost one.
+const escapeStack: { current: () => void }[] = [];
+let escapeListening = false;
+
 function useEscape(onClose: () => void) {
+  const ref = useRef(onClose);
+  ref.current = onClose;
   useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+    const entry = { get current() { return ref.current; } };
+    escapeStack.push(entry);
+    if (!escapeListening) {
+      escapeListening = true;
+      window.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || !escapeStack.length) return;
         e.stopPropagation();
-        onClose();
-      }
+        escapeStack[escapeStack.length - 1].current();
+      });
+    }
+    return () => {
+      const i = escapeStack.indexOf(entry);
+      if (i >= 0) escapeStack.splice(i, 1);
     };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  }, []);
 }
 
 export function Modal({
@@ -248,12 +260,17 @@ export function Popover({
       if (ref.current?.contains(e.target as Node) || anchor.current?.contains(e.target as Node)) return;
       onClose();
     };
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    // Capture phase + stopPropagation: Escape closes only this popover, not the drawer or modal behind it.
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      onClose();
+    };
     document.addEventListener('mousedown', down);
-    document.addEventListener('keydown', key);
+    window.addEventListener('keydown', key, true);
     return () => {
       document.removeEventListener('mousedown', down);
-      document.removeEventListener('keydown', key);
+      window.removeEventListener('keydown', key, true);
     };
   }, [anchor, onClose]);
   return createPortal(
