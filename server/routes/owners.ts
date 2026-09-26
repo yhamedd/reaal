@@ -60,7 +60,7 @@ function withNorms(data: Record<string, any>) {
   return data;
 }
 
-export function findOwnerDuplicates(db: DB, data: { name?: string | null; primary_phone?: string | null; secondary_phone?: string | null; whatsapp?: string | null; email?: string | null }, excludeId = 0) {
+export async function findOwnerDuplicates(db: DB, data: { name?: string | null; primary_phone?: string | null; secondary_phone?: string | null; whatsapp?: string | null; email?: string | null }, excludeId = 0) {
   const phones = [data.primary_phone, data.secondary_phone, data.whatsapp].map((p) => normalizePhone(p)).filter((p) => p.length >= 7);
   const clauses: string[] = [];
   const params: any[] = [];
@@ -78,7 +78,7 @@ export function findOwnerDuplicates(db: DB, data: { name?: string | null; primar
     params.push(data.name.trim());
   }
   if (!clauses.length) return [];
-  const rows = all<any>(db, `${OWNER_SELECT} WHERE (${clauses.join(' OR ')}) AND o.id <> ? LIMIT 10`, [...params, excludeId]);
+  const rows = await all<any>(db, `${OWNER_SELECT} WHERE (${clauses.join(' OR ')}) AND o.id <> ? LIMIT 10`, [...params, excludeId]);
   return rows.map((r) => {
     const reasons: string[] = [];
     const rPhones = [r.primary_phone_norm, r.secondary_phone_norm, r.whatsapp_norm].filter(Boolean);
@@ -89,16 +89,16 @@ export function findOwnerDuplicates(db: DB, data: { name?: string | null; primar
   });
 }
 
-export function insertOwner(db: DB, user: AuthUser, data: Record<string, any>) {
+export async function insertOwner(db: DB, user: AuthUser, data: Record<string, any>) {
   withNorms(data);
   const cols = ['name', 'name_ar', 'address', 'primary_phone', 'primary_phone_norm', 'secondary_phone', 'secondary_phone_norm', 'whatsapp', 'whatsapp_norm', 'email', 'assigned_user_id', 'source', 'status', 'last_contacted'];
   const values = cols.map((c) => data[c] ?? null);
   if (!data.status) values[cols.indexOf('status')] = 'Active';
-  const { lastId } = run(db, `INSERT INTO owners (${cols.join(', ')}, created_by) VALUES (${cols.map(() => '?').join(', ')}, ?)`, [...values, user.id]);
+  const { lastId } = await run(db, `INSERT INTO owners (${cols.join(', ')}, created_by) VALUES (${cols.map(() => '?').join(', ')}, ?)`, [...values, user.id]);
   return lastId;
 }
 
-ownersRouter.get('/', requirePermission('owners.view'), (req, res) => {
+ownersRouter.get('/', requirePermission('owners.view'), async (req, res) => {
   const db = req.db;
   const q = String(req.query.q ?? '').trim();
   const clauses: string[] = [];
@@ -112,11 +112,11 @@ ownersRouter.get('/', requirePermission('owners.view'), (req, res) => {
   }
   if (q) {
     const like = `%${likeEscape(q)}%`;
-    const parts = ["o.name LIKE ? ESCAPE '\\'", "o.name_ar LIKE ? ESCAPE '\\'", "o.email LIKE ? ESCAPE '\\'"];
+    const parts = ["o.name ILIKE ? ESCAPE '\\'", "o.name_ar ILIKE ? ESCAPE '\\'", "o.email ILIKE ? ESCAPE '\\'"];
     params.push(like, like, like);
     const phone = normalizePhone(q);
     if (phone.length >= 3 && /^[\d\s+()-]+$/.test(q) && can(req.user, 'owners.contact')) {
-      parts.push('o.primary_phone_norm LIKE ? OR o.secondary_phone_norm LIKE ? OR o.whatsapp_norm LIKE ?');
+      parts.push('o.primary_phone_norm ILIKE ? OR o.secondary_phone_norm ILIKE ? OR o.whatsapp_norm ILIKE ?');
       params.push(`%${phone}%`, `%${phone}%`, `%${phone}%`);
     }
     const code = q.match(/^o-?0*(\d+)$/i);
@@ -146,41 +146,42 @@ ownersRouter.get('/', requirePermission('owners.view'), (req, res) => {
     created_at: 'o.created_at',
     updated_at: 'o.updated_at',
     last_contacted: 'o.last_contacted',
-    unit_count: 'unit_count',
+    // Postgres can't use output aliases inside ORDER BY expressions, so spell these out.
+    unit_count: '(SELECT COUNT(*) FROM units u WHERE u.owner_id = o.id AND u.archived_at IS NULL)',
     status: 'o.status',
-    agent_name: 'agent_name',
+    agent_name: 'a.name COLLATE NOCASE',
   };
   const sortKey = sorts[String(req.query.sort ?? '')] ?? 'o.updated_at';
   const dir = req.query.dir === 'asc' ? 'ASC' : 'DESC';
   const limit = Math.min(Number(req.query.limit) || 100, 1000);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
-  const total = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM owners o ${where}`, params)!.n;
-  const rows = all<any>(db, `${OWNER_SELECT} ${where} ORDER BY ${sortKey} IS NULL, ${sortKey} ${dir}, o.id DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
-  const tags = getTags(db, 'owner', rows.map((r) => r.id));
+  const total = (await get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM owners o ${where}`, params))!.n;
+  const rows = await all<any>(db, `${OWNER_SELECT} ${where} ORDER BY ${sortKey} IS NULL, ${sortKey} ${dir}, o.id DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
+  const tags = await getTags(db, 'owner', rows.map((r) => r.id));
   res.json({ total, rows: rows.map((r) => redactOwner(req.user, { ...r, code: ownerCode(r.id), tags: tags.get(r.id) ?? [] })) });
 });
 
-ownersRouter.post('/check-duplicates', requirePermission('owners.view'), (req, res) => {
-  const dups = findOwnerDuplicates(req.db, req.body ?? {}, Number(req.body?.exclude_id) || 0);
+ownersRouter.post('/check-duplicates', requirePermission('owners.view'), async (req, res) => {
+  const dups = await findOwnerDuplicates(req.db, req.body ?? {}, Number(req.body?.exclude_id) || 0);
   res.json({ duplicates: dups.map((d) => redactOwner(req.user, { ...d, code: ownerCode(d.id) })) });
 });
 
-ownersRouter.post('/', requirePermission('owners.create'), (req, res) => {
+ownersRouter.post('/', requirePermission('owners.create'), async (req, res) => {
   const db = req.db;
   const data = coerce(req.body ?? {}, OWNER_SPEC, false);
-  const dups = findOwnerDuplicates(db, data);
+  const dups = await findOwnerDuplicates(db, data);
   if (dups.length && !req.body?.confirm_duplicate) {
     return res.status(409).json({
       error: 'Possible duplicate found',
       duplicates: dups.map((d) => redactOwner(req.user, { ...d, code: ownerCode(d.id) })),
     });
   }
-  const id = tx(db, () => {
-    const id = insertOwner(db, req.user!, data);
-    if (Array.isArray(req.body?.tag_ids)) setTags(db, 'owner', id, idList(req.body.tag_ids));
-    logActivity(db, { userId: req.user!.id, action: 'created', entityType: 'owner', entityId: id, label: data.name, message: `added a new owner ${data.name}` });
+  const id = await tx(db, async (db) => {
+    const id = await insertOwner(db, req.user!, data);
+    if (Array.isArray(req.body?.tag_ids)) await setTags(db, 'owner', id, idList(req.body.tag_ids));
+    await logActivity(db, { userId: req.user!.id, action: 'created', entityType: 'owner', entityId: id, label: data.name, message: `added a new owner ${data.name}` });
     if (dups.length) {
-      logActivity(db, {
+      await logActivity(db, {
         userId: req.user!.id,
         action: 'duplicate_acknowledged',
         entityType: 'owner',
@@ -189,42 +190,42 @@ ownersRouter.post('/', requirePermission('owners.create'), (req, res) => {
         newValue: dups.map((d) => d.id).join(','),
         message: `created ${data.name} despite a possible duplicate (${dups.map((d) => ownerCode(d.id)).join(', ')})`,
       });
-      notifyPermission(db, 'users.manage', 'duplicate', `${req.user!.name} created a possible duplicate owner: ${data.name}`, `/owners/${id}`, req.user!.id);
+      await notifyPermission(db, 'users.manage', 'duplicate', `${req.user!.name} created a possible duplicate owner: ${data.name}`, `/owners/${id}`, req.user!.id);
     }
     if (data.assigned_user_id && data.assigned_user_id !== req.user!.id) {
-      notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned owner ${data.name} to you`, `/owners/${id}`);
+      await notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned owner ${data.name} to you`, `/owners/${id}`);
     }
     return id;
   });
   res.status(201).json({ id });
 });
 
-ownersRouter.get('/:id', requirePermission('owners.view'), (req, res) => {
+ownersRouter.get('/:id', requirePermission('owners.view'), async (req, res) => {
   const db = req.db;
   const id = intParam(req.params.id);
-  const owner = get<any>(db, `${OWNER_SELECT} WHERE o.id = ?`, [id]);
+  const owner = await get<any>(db, `${OWNER_SELECT} WHERE o.id = ?`, [id]);
   if (!owner) throw new HttpError(404, 'Owner not found');
   const units = can(req.user, 'inventory.view')
-    ? all<any>(db, `${UNIT_SELECT} WHERE u.owner_id = ? ORDER BY u.archived_at IS NOT NULL, u.updated_at DESC`, [id])
+    ? await all<any>(db, `${UNIT_SELECT} WHERE u.owner_id = ? ORDER BY u.archived_at IS NOT NULL, u.updated_at DESC`, [id])
     : [];
-  const tags = getTags(db, 'owner', [id]).get(id) ?? [];
+  const tags = (await getTags(db, 'owner', [id])).get(id) ?? [];
   res.json({
     ...redactOwner(req.user, { ...owner, code: ownerCode(id), tags }),
     units: units.map((u) => ({ id: u.id, project: u.project, developer: u.developer, phase: u.phase, unit_number: u.unit_number, property_type: u.property_type, bua: u.bua, land_area: u.land_area, bedrooms: u.bedrooms, asking_price: u.asking_price, status: u.status, archived_at: u.archived_at, last_verified: u.last_verified })),
   });
 });
 
-ownersRouter.patch('/:id', requirePermission('owners.edit'), (req, res) => {
+ownersRouter.patch('/:id', requirePermission('owners.edit'), async (req, res) => {
   const db = req.db;
   const id = intParam(req.params.id);
-  const before = get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
+  const before = await get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
   if (!before) throw new HttpError(404, 'Owner not found');
   const data = withNorms(coerce(req.body ?? {}, OWNER_SPEC, true));
   if (!can(req.user, 'owners.contact')) {
     for (const k of ['primary_phone', 'secondary_phone', 'whatsapp', 'email', 'address', 'primary_phone_norm', 'secondary_phone_norm', 'whatsapp_norm']) delete data[k];
   }
   if (data.status === 'Archived' && !can(req.user, 'owners.delete')) throw new HttpError(403, "You don't have permission to archive owners");
-  tx(db, () => {
+  await tx(db, async (db) => {
     const keys = Object.keys(data);
     if (keys.length) {
       if (data.status === 'Archived' && !before.archived_at) {
@@ -233,62 +234,62 @@ ownersRouter.patch('/:id', requirePermission('owners.edit'), (req, res) => {
         data.archived_at = null;
       }
       const setKeys = Object.keys(data);
-      run(db, `UPDATE owners SET ${setKeys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, [...setKeys.map((k) => data[k]), nowIso(), id]);
-      logChanges(db, req.user!, 'owner', id, data.name ?? before.name, before, data, OWNER_LOG);
+      await run(db, `UPDATE owners SET ${setKeys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, [...setKeys.map((k) => data[k]), nowIso(), id]);
+      await logChanges(db, req.user!, 'owner', id, data.name ?? before.name, before, data, OWNER_LOG);
       if (data.assigned_user_id && data.assigned_user_id !== before.assigned_user_id && data.assigned_user_id !== req.user!.id) {
-        notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned owner ${data.name ?? before.name} to you`, `/owners/${id}`);
+        await notify(db, data.assigned_user_id, 'assigned', `${req.user!.name} assigned owner ${data.name ?? before.name} to you`, `/owners/${id}`);
       }
     }
-    if (Array.isArray(req.body?.tag_ids)) setTags(db, 'owner', id, idList(req.body.tag_ids));
+    if (Array.isArray(req.body?.tag_ids)) await setTags(db, 'owner', id, idList(req.body.tag_ids));
   });
   res.json({ ok: true });
 });
 
-ownersRouter.post('/:id/contacted', requirePermission('owners.view'), (req, res) => {
+ownersRouter.post('/:id/contacted', requirePermission('owners.view'), async (req, res) => {
   const db = req.db;
   const id = intParam(req.params.id);
-  const owner = get<any>(db, 'SELECT id, name FROM owners WHERE id = ?', [id]);
+  const owner = await get<any>(db, 'SELECT id, name FROM owners WHERE id = ?', [id]);
   if (!owner) throw new HttpError(404, 'Owner not found');
   const channel = req.body?.channel === 'whatsapp' ? 'WhatsApp' : 'phone';
-  run(db, 'UPDATE owners SET last_contacted = ? WHERE id = ?', [nowIso(), id]);
-  logActivity(db, { userId: req.user!.id, action: 'contacted', entityType: 'owner', entityId: id, label: owner.name, message: `contacted ${owner.name} by ${channel}` });
+  await run(db, 'UPDATE owners SET last_contacted = ? WHERE id = ?', [nowIso(), id]);
+  await logActivity(db, { userId: req.user!.id, action: 'contacted', entityType: 'owner', entityId: id, label: owner.name, message: `contacted ${owner.name} by ${channel}` });
   res.json({ ok: true });
 });
 
-ownersRouter.post('/:id/archive', requirePermission('owners.delete'), (req, res) => {
+ownersRouter.post('/:id/archive', requirePermission('owners.delete'), async (req, res) => {
   const db = req.db;
   const id = intParam(req.params.id);
-  const owner = get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
+  const owner = await get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
   if (!owner) throw new HttpError(404, 'Owner not found');
-  run(db, "UPDATE owners SET status = 'Archived', archived_at = ?, updated_at = ? WHERE id = ?", [nowIso(), nowIso(), id]);
-  logActivity(db, { userId: req.user!.id, action: 'archived', entityType: 'owner', entityId: id, label: owner.name, oldValue: owner.status, newValue: 'Archived', message: `archived owner ${owner.name}` });
+  await run(db, "UPDATE owners SET status = 'Archived', archived_at = ?, updated_at = ? WHERE id = ?", [nowIso(), nowIso(), id]);
+  await logActivity(db, { userId: req.user!.id, action: 'archived', entityType: 'owner', entityId: id, label: owner.name, oldValue: owner.status, newValue: 'Archived', message: `archived owner ${owner.name}` });
   res.json({ ok: true });
 });
 
-ownersRouter.post('/:id/restore', requirePermission('owners.delete'), (req, res) => {
+ownersRouter.post('/:id/restore', requirePermission('owners.delete'), async (req, res) => {
   const db = req.db;
   const id = intParam(req.params.id);
-  const owner = get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
+  const owner = await get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
   if (!owner) throw new HttpError(404, 'Owner not found');
-  run(db, "UPDATE owners SET status = 'Active', archived_at = NULL, updated_at = ? WHERE id = ?", [nowIso(), id]);
-  logActivity(db, { userId: req.user!.id, action: 'restored', entityType: 'owner', entityId: id, label: owner.name, message: `restored owner ${owner.name}` });
+  await run(db, "UPDATE owners SET status = 'Active', archived_at = NULL, updated_at = ? WHERE id = ?", [nowIso(), id]);
+  await logActivity(db, { userId: req.user!.id, action: 'restored', entityType: 'owner', entityId: id, label: owner.name, message: `restored owner ${owner.name}` });
   res.json({ ok: true });
 });
 
-ownersRouter.delete('/:id', requirePermission('records.purge'), (req, res) => {
+ownersRouter.delete('/:id', requirePermission('records.purge'), async (req, res) => {
   const db = req.db;
   const id = intParam(req.params.id);
-  const owner = get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
+  const owner = await get<any>(db, 'SELECT * FROM owners WHERE id = ?', [id]);
   if (!owner) throw new HttpError(404, 'Owner not found');
   if (String(req.body?.confirm ?? '') !== owner.name) throw new HttpError(400, 'Type the owner name exactly to confirm permanent deletion');
   if (!owner.archived_at) throw new HttpError(400, 'Archive the owner before deleting permanently');
-  tx(db, () => {
-    run(db, 'UPDATE units SET owner_id = NULL WHERE owner_id = ?', [id]);
-    deleteEntityFiles(db, 'owner', id);
-    run(db, "DELETE FROM notes WHERE entity_type = 'owner' AND entity_id = ?", [id]);
-    run(db, "DELETE FROM taggings WHERE entity_type = 'owner' AND entity_id = ?", [id]);
-    run(db, 'DELETE FROM owners WHERE id = ?', [id]);
-    logActivity(db, { userId: req.user!.id, action: 'purged', entityType: 'owner', entityId: id, label: owner.name, message: `permanently deleted owner ${owner.name}` });
+  await tx(db, async (db) => {
+    await run(db, 'UPDATE units SET owner_id = NULL WHERE owner_id = ?', [id]);
+    await deleteEntityFiles(db, 'owner', id);
+    await run(db, "DELETE FROM notes WHERE entity_type = 'owner' AND entity_id = ?", [id]);
+    await run(db, "DELETE FROM taggings WHERE entity_type = 'owner' AND entity_id = ?", [id]);
+    await run(db, 'DELETE FROM owners WHERE id = ?', [id]);
+    await logActivity(db, { userId: req.user!.id, action: 'purged', entityType: 'owner', entityId: id, label: owner.name, message: `permanently deleted owner ${owner.name}` });
   });
   res.json({ ok: true });
 });

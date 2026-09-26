@@ -5,5 +5,7 @@ export default defineConfig({
     include: ['server/**/*.test.ts', 'shared/**/*.test.ts'],
     environment: 'node',
     pool: 'forks',
+    // The default in-memory database is PostgreSQL compiled to WebAssembly; import tests need headroom.
+    testTimeout: 30_000,
   },
 });

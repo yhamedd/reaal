@@ -10,7 +10,7 @@ On GitHub, open this repository, click **Code → Codespaces → Create codespac
 
 ## Quick start
 
-Requirements: **Node.js 22.13+**. There's no separate database server: the app uses Node's built-in SQLite.
+Requirements: **Node.js 22.13+**. Nothing else to install for local use: without `DATABASE_URL` the app runs an embedded PostgreSQL (PGlite) in `./data/pg`. Production uses **Supabase** (database and file storage) and **Vercel** (hosting), see [Deploy](#deploy-supabase--vercel).
 
 ```bash
 npm install
@@ -27,15 +27,42 @@ npm run build
 npm start                    # serves the API and the built web app on $PORT (default 3000)
 ```
 
-All data lives in `DATA_DIR` (default `./data`): `reaal.db` plus `uploads/`. Back up that folder. Run behind HTTPS; cookies are `Secure` in production unless `COOKIE_SECURE=false`.
+Locally, all data lives in `DATA_DIR` (default `./data`): the database in `pg/` plus `uploads/`. With `DATABASE_URL` and `SUPABASE_*` set, `npm start` uses Supabase instead. Run behind HTTPS; cookies are `Secure` in production unless `COOKIE_SECURE=false`.
+
+## Deploy (Supabase + Vercel)
+
+**1. Supabase** (database and files)
+1. Create a project at [supabase.com](https://supabase.com) and note the database password.
+2. **Connect** (top bar) → **Connection string** → **Transaction pooler** (port `6543`). Copy it and put your password in place of `[YOUR-PASSWORD]`. This is `DATABASE_URL`.
+3. **Project Settings → API**: copy the **Project URL** (`SUPABASE_URL`) and the **service_role** secret key (`SUPABASE_SERVICE_ROLE_KEY`). This key is server-only: never put it in client code or share it.
+
+You don't need to run any SQL. The app creates its tables on first start and turns on row-level security for all of them, so Supabase's public REST API can't read them; only the app's own database connection can. Uploaded files go to a **private** bucket `reaal-files`, created automatically, and are served only through the app's permission checks.
+
+**2. Vercel** (hosting)
+1. At [vercel.com/new](https://vercel.com/new), import this GitHub repository. Keep the defaults: `vercel.json` already sets the build (`npm run build`), the output (`dist`) and the API function.
+2. Under **Environment Variables** add:
+
+| Name | Value |
+| --- | --- |
+| `DATABASE_URL` | Supabase transaction pooler string (port 6543) |
+| `SUPABASE_URL` | `https://<project>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service_role key |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | the first Super Admin (used only while there are no users) |
+| `CRON_SECRET` | any long random string (secures the daily reminder job) |
+
+3. Click **Deploy**, open the URL and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+
+A daily Vercel Cron (`/api/cron/daily`) sends verification reminders and cleans up expired sessions. On Vercel, uploads are limited to 4 MB per file and spreadsheet imports to 4 MB, because Vercel caps request bodies at 4.5 MB.
+
+To move local data to Supabase, re-import your spreadsheets on the deployed app. The local `data/` folder is never uploaded.
 
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | API (tsx watch) + Vite dev server with proxy |
 | `npm run build` / `npm start` | Production build / run |
-| `npm test` | API integration and unit tests (Vitest + Supertest) |
+| `npm test` | API integration and unit tests (Vitest + Supertest). Set `TEST_DATABASE_URL=postgres://…` to run them against a real PostgreSQL server |
 | `npm run typecheck` | Type-check client and server |
-| `npm run reset -- --yes` | Delete all local data and start empty (stop the app first) |
+| `npm run reset -- --yes` | Delete all local data and start empty (stop the app first; never touches Supabase) |
 
 ## What's included
 
@@ -107,8 +134,10 @@ All data lives in `DATA_DIR` (default `./data`): `reaal.db` plus `uploads/`. Bac
 ```
 shared/     Types and logic used by both sides: permissions catalogue, phone normalisation,
             number/money parsing, filter spec, constants
-server/     Express 5 API on node:sqlite
-  db.ts           schema (created automatically) and query helpers
+server/     Express 5 API on PostgreSQL (Supabase, or embedded PGlite locally)
+  db.ts           schema (created and versioned automatically) and query helpers
+  storage.ts      uploaded files: Supabase Storage or local disk
+  vercel.ts       Vercel function entry (api/index.js)
   auth.ts         password hashing, sessions, throttling, permission middleware
   routes/         one router per area (units, owners, requirements, offers, imports, …)
   services/       unit queries & filters, matching, offer template engine, PDF, import pipeline

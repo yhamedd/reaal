@@ -1,12 +1,10 @@
-import { all, get, run, tx, type DB } from '../db.js';
+import { all, get, insertMany, run, tx, type DB } from '../db.js';
 import type { AuthUser } from '../auth.js';
 import { normalizePhone, isValidPhone } from '../../shared/phone.js';
 import { parseLooseNumber } from '../../shared/format.js';
 import { UNIT_STATUSES, OWNER_STATUSES, FURNISHING } from '../../shared/constants.js';
 import { normalizeUnitNumber } from '../util.js';
-import { canonicalValue, ensureDeveloper, ensureProject, findDeveloper, findProject } from './masterData.js';
-import { insertUnit } from '../routes/units.js';
-import { insertOwner } from '../routes/owners.js';
+import { ensureDeveloper, ensureProject } from './masterData.js';
 import { logActivity } from '../activity.js';
 import { cleanAddress, cleanArabicName, cleanPersonName, combinePhone, isPhonePlaceholder, parseLocationCode } from './importParsing.js';
 
@@ -159,7 +157,7 @@ export interface ImportOptions {
   status?: string | null;
 }
 
-export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: Record<string, string>[], mapping: Record<string, string>, options: ImportOptions = {}) {
+export async function validateRows(db: DB, kind: ImportKind, headers: string[], rows: Record<string, string>[], mapping: Record<string, string>, options: ImportOptions = {}) {
   const fields = fieldsFor(kind);
   const fieldByKey = new Map(fields.map((f) => [f.key, f]));
   const inverse = new Map<string, string>(); // target → header
@@ -169,7 +167,7 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
   const missingRequired = fields
     .filter((f) => f.required && !inverse.has(f.key) && !(f.key === 'project' && inverse.has('location_code')))
     .map((f) => f.label);
-  const projectNames = all<{ name: string }>(db, 'SELECT name FROM projects').map((p) => p.name);
+  const projectNames = (await all<{ name: string }>(db, 'SELECT name FROM projects')).map((p) => p.name);
   // Pair each phone column with its country-code column ("Mobile" ↔ "Mobile Country Code").
   const ccFor = (key: string) => {
     const header = normHeader(inverse.get(key) ?? '');
@@ -178,15 +176,35 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
   };
   const status = options.status ? UNIT_STATUSES.find((s) => s.toLowerCase() === String(options.status).toLowerCase()) : undefined;
 
-  const users = all<{ id: number; name: string; email: string }>(db, "SELECT id, name, email FROM users WHERE status = 'active'");
-  const tagNames = new Map(all<{ id: number; name: string }>(db, 'SELECT id, name FROM tags').map((t) => [t.name.toLowerCase(), t.id]));
+  const users = await all<{ id: number; name: string; email: string }>(db, "SELECT id, name, email FROM users WHERE status = 'active'");
+  const tagNames = new Map((await all<{ id: number; name: string }>(db, 'SELECT id, name FROM tags')).map((t) => [t.name.toLowerCase(), t.id]));
+  // Load everything the checks need up front: one query each instead of several per row.
+  const developersByName = new Set((await all<{ name: string }>(db, 'SELECT name FROM developers')).map((d) => d.name.toLowerCase()));
+  const projectsByName = new Map((await all<{ id: number; name: string }>(db, 'SELECT id, name FROM projects')).map((p) => [p.name.toLowerCase(), p]));
+  const canonical = new Map<string, string>();
+  for (const v of await all<{ category: string; value: string }>(db, "SELECT category, value FROM master_values WHERE category IN ('property_type', 'finishing')")) {
+    canonical.set(`${v.category}|${v.value.toLowerCase()}`, v.value);
+  }
+  const ownersByPhone = new Map<string, { id: number; name: string }>();
+  const ownersByName = new Map<string, { id: number; name: string }>();
+  for (const o of await all<any>(db, 'SELECT id, name, primary_phone_norm, secondary_phone_norm, whatsapp_norm FROM owners')) {
+    for (const p of [o.primary_phone_norm, o.secondary_phone_norm, o.whatsapp_norm]) if (p && !ownersByPhone.has(p)) ownersByPhone.set(p, o);
+    const n = String(o.name).trim().toLowerCase();
+    if (!ownersByName.has(n)) ownersByName.set(n, o);
+  }
+  const unitsByNumber = new Map<string, { id: number; phase: string }[]>();
+  for (const u of await all<any>(db, 'SELECT id, project_id, unit_number_norm, phase FROM units WHERE archived_at IS NULL AND unit_number_norm IS NOT NULL')) {
+    const k = `${u.project_id}|${u.unit_number_norm}`;
+    if (!unitsByNumber.has(k)) unitsByNumber.set(k, []);
+    unitsByNumber.get(k)!.push({ id: u.id, phase: String(u.phase ?? '').trim().toLowerCase() });
+  }
   const newProjects = new Set<string>();
   const newDevelopers = new Set<string>();
   const seenUnits = new Map<string, number>();
   const seenOwnerPhones = new Map<string, { key: string; row: number }>();
   const results: RowResult[] = [];
 
-  rows.forEach((raw, idx) => {
+  for (const [idx, raw] of rows.entries()) {
     const r: RowResult = { row: idx + 2, status: 'ready', errors: [], warnings: [], data: {} };
     const val = (key: string) => {
       const h = inverse.get(key);
@@ -323,12 +341,7 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
     // Owner matching (by any phone number)
     const phones = ['primary_phone', 'secondary_phone', 'whatsapp'].map((k) => normalizePhone(r.data[k])).filter((p) => p.length >= 7);
     if (phones.length) {
-      const ph = phones.map(() => '?').join(',');
-      const existing = get<any>(
-        db,
-        `SELECT id, name FROM owners WHERE primary_phone_norm IN (${ph}) OR secondary_phone_norm IN (${ph}) OR whatsapp_norm IN (${ph}) LIMIT 1`,
-        [...phones, ...phones, ...phones],
-      );
+      const existing = phones.map((p) => ownersByPhone.get(p)).find(Boolean);
       if (existing) {
         r.owner_match_id = existing.id;
         if (kind === 'owners') {
@@ -350,7 +363,7 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
         r.owner_key = key;
       }
     } else if (r.data.owner_name) {
-      const byName = get<any>(db, 'SELECT id, name FROM owners WHERE TRIM(name) = ? COLLATE NOCASE LIMIT 1', [String(r.data.owner_name).trim()]);
+      const byName = ownersByName.get(String(r.data.owner_name).trim().toLowerCase());
       if (byName) {
         r.owner_match_id = byName.id;
         if (kind === 'owners') {
@@ -368,18 +381,18 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
 
     if (kind === 'inventory') {
       // Master data
-      if (r.data.developer && !findDeveloper(db, r.data.developer)) newDevelopers.add(String(r.data.developer));
-      const project = r.data.project ? findProject(db, r.data.project) : null;
+      if (r.data.developer && !developersByName.has(String(r.data.developer).toLowerCase())) newDevelopers.add(String(r.data.developer));
+      const project = r.data.project ? projectsByName.get(String(r.data.project).toLowerCase()) ?? null : null;
       if (r.data.project && !project) {
         newProjects.add(String(r.data.project));
         r.warnings.push(`New project “${r.data.project}” will be created`);
       }
       if (r.data.property_type) {
-        const canonical = canonicalValue(db, 'property_type', r.data.property_type);
-        if (canonical) r.data.property_type = canonical;
+        const known = canonical.get(`property_type|${String(r.data.property_type).toLowerCase()}`);
+        if (known) r.data.property_type = known;
         else r.warnings.push(`Property type “${r.data.property_type}” is not in the master list`);
       }
-      if (r.data.finishing) r.data.finishing = canonicalValue(db, 'finishing', r.data.finishing) ?? r.data.finishing;
+      if (r.data.finishing) r.data.finishing = canonical.get(`finishing|${String(r.data.finishing).toLowerCase()}`) ?? r.data.finishing;
 
       // Duplicate property detection
       const unitNo = normalizeUnitNumber(r.data.unit_number);
@@ -389,12 +402,7 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
         const phase = String(r.data.phase ?? '').trim().toLowerCase();
         const key = `${String(r.data.project).toLowerCase()}|${phase}|${unitNo}`;
         if (project) {
-          const dup = get<any>(
-            db,
-            `SELECT id FROM units WHERE project_id = ? AND unit_number_norm = ? AND archived_at IS NULL
-               AND (? = '' OR phase IS NULL OR TRIM(phase) = '' OR LOWER(TRIM(phase)) = ?) LIMIT 1`,
-            [project.id, unitNo, phase, phase],
-          );
+          const dup = (unitsByNumber.get(`${project.id}|${unitNo}`) ?? []).find((u) => !phase || !u.phase || u.phase === phase);
           if (dup) {
             r.duplicate_unit_id = dup.id;
             r.status = 'duplicate';
@@ -412,7 +420,7 @@ export function validateRows(db: DB, kind: ImportKind, headers: string[], rows: 
 
     if (r.errors.length) r.status = 'error';
     results.push(r);
-  });
+  }
 
   if (missingRequired.length) {
     for (const r of results) {
@@ -439,117 +447,161 @@ export type DuplicatePolicy = 'skip' | 'create' | 'update';
 
 const UNIT_KEYS = ['phase', 'unit_number', 'property_type', 'bua', 'land_area', 'bedrooms', 'bathrooms', 'floors', 'finishing', 'furnished', 'view', 'location', 'delivery', 'asking_price', 'original_price', 'paid_amount', 'remaining_amount', 'maintenance', 'payment_notes', 'status', 'assigned_user_id', 'source', 'last_verified'];
 
-export function executeImport(db: DB, user: AuthUser, importId: number, kind: ImportKind, results: RowResult[], policy: DuplicatePolicy, filename: string) {
+const OWNER_COLS = ['name', 'name_ar', 'address', 'primary_phone', 'primary_phone_norm', 'secondary_phone', 'secondary_phone_norm', 'whatsapp', 'whatsapp_norm', 'email', 'assigned_user_id', 'source', 'status', 'created_by'];
+const UNIT_COLS = ['owner_id', 'developer_id', 'project_id', ...UNIT_KEYS, 'unit_number_norm', 'created_by'];
+
+function ownerRow(r: RowResult, user: AuthUser, status: string) {
+  const primary = r.data.primary_phone ?? r.data.whatsapp ?? null;
+  const values: Record<string, unknown> = {
+    name: r.data.owner_name || 'Unknown owner',
+    name_ar: r.data.owner_name_ar ?? null,
+    address: r.data.owner_address ?? null,
+    primary_phone: primary,
+    primary_phone_norm: normalizePhone(primary) || null,
+    secondary_phone: r.data.secondary_phone ?? null,
+    secondary_phone_norm: normalizePhone(r.data.secondary_phone) || null,
+    whatsapp: r.data.whatsapp ?? null,
+    whatsapp_norm: normalizePhone(r.data.whatsapp) || null,
+    email: r.data.owner_email ?? null,
+    assigned_user_id: r.data.assigned_user_id ?? null,
+    source: r.data.source ?? 'Import',
+    status,
+    created_by: user.id,
+  };
+  return OWNER_COLS.map((c) => values[c] ?? null);
+}
+
+/**
+ * Writes validated rows. Everything is batched (hundreds of rows per statement) so a
+ * 7,000-row sheet takes a few dozen round trips instead of tens of thousands.
+ */
+export async function executeImport(db: DB, user: AuthUser, importId: number, kind: ImportKind, results: RowResult[], policy: DuplicatePolicy, filename: string) {
   const counts = { created_units: 0, updated_units: 0, created_owners: 0, linked_owners: 0, updated_owners: 0, skipped: 0, errors: 0 };
-  tx(db, () => {
-    const ownerCache = new Map<string, number>();
-    const resolveOwner = (r: RowResult): number | null => {
-      if (r.owner_match_id) {
-        counts.linked_owners++;
-        // Fill in details the existing owner record is missing, never overwrite.
-        if (r.data.owner_name_ar || r.data.owner_address) {
-          run(db, 'UPDATE owners SET name_ar = COALESCE(name_ar, ?), address = COALESCE(address, ?) WHERE id = ?', [r.data.owner_name_ar ?? null, r.data.owner_address ?? null, r.owner_match_id]);
-        }
-        return r.owner_match_id;
-      }
-      if (!r.data.owner_name && !r.data.primary_phone) return null;
-      if (r.owner_key && ownerCache.has(r.owner_key)) return ownerCache.get(r.owner_key)!;
-      const id = insertOwner(db, user, {
-        name: r.data.owner_name || 'Unknown owner',
-        primary_phone: r.data.primary_phone ?? r.data.whatsapp ?? null,
-        secondary_phone: r.data.secondary_phone ?? null,
-        whatsapp: r.data.whatsapp ?? null,
-        email: r.data.owner_email ?? null,
-        name_ar: r.data.owner_name_ar ?? null,
-        address: r.data.owner_address ?? null,
-        source: r.data.source ?? 'Import',
-        assigned_user_id: r.data.assigned_user_id ?? null,
-        status: kind === 'owners' ? r.data.status ?? 'Active' : 'Active',
-      });
-      counts.created_owners++;
-      if (r.owner_key) ownerCache.set(r.owner_key, id);
-      return id;
-    };
-    const addNoteAndTags = (entityType: string, id: number, r: RowResult) => {
-      if (r.data.notes) run(db, 'INSERT INTO notes (entity_type, entity_id, content, author_id) VALUES (?, ?, ?, ?)', [entityType, id, `Imported note: ${r.data.notes}`, user.id]);
-      for (const t of r.data.tag_ids ?? []) run(db, 'INSERT OR IGNORE INTO taggings (tag_id, entity_type, entity_id) VALUES (?, ?, ?)', [t, entityType, id]);
+  await tx(db, async (db) => {
+    const rows: RowResult[] = [];
+    for (const r of results) {
+      if (r.status === 'error') counts.errors++;
+      else if (r.status === 'duplicate' && policy === 'skip') counts.skipped++;
+      else rows.push(r);
+    }
+    const notes: unknown[][] = [];
+    const taggings: unknown[][] = [];
+    const extras = (entityType: string, id: number, r: RowResult) => {
+      if (r.data.notes) notes.push([entityType, id, `Imported note: ${r.data.notes}`, user.id]);
+      for (const t of r.data.tag_ids ?? []) taggings.push([t, entityType, id]);
     };
 
-    for (const r of results) {
-      if (r.status === 'error') {
-        counts.errors++;
-        continue;
-      }
-      if (r.status === 'duplicate' && policy === 'skip') {
-        counts.skipped++;
-        continue;
-      }
-      if (kind === 'owners') {
+    if (kind === 'owners') {
+      const fresh: RowResult[] = [];
+      for (const r of rows) {
         if (r.status === 'duplicate' && policy === 'update' && r.duplicate_owner_id) {
           const patch: Record<string, any> = {};
           if (r.data.secondary_phone) patch.secondary_phone = r.data.secondary_phone;
           if (r.data.whatsapp) patch.whatsapp = r.data.whatsapp;
           if (r.data.owner_email) patch.email = r.data.owner_email;
+          if (r.data.owner_name_ar) patch.name_ar = r.data.owner_name_ar;
+          if (r.data.owner_address) patch.address = r.data.owner_address;
           if (r.data.source) patch.source = r.data.source;
           if (r.data.assigned_user_id) patch.assigned_user_id = r.data.assigned_user_id;
-          if (Object.keys(patch).length) {
-            if (patch.secondary_phone) patch.secondary_phone_norm = normalizePhone(patch.secondary_phone);
-            if (patch.whatsapp) patch.whatsapp_norm = normalizePhone(patch.whatsapp);
-            const cols = Object.keys(patch);
-            run(db, `UPDATE owners SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...cols.map((k) => patch[k]), r.duplicate_owner_id]);
-          }
-          addNoteAndTags('owner', r.duplicate_owner_id, r);
+          if (patch.secondary_phone) patch.secondary_phone_norm = normalizePhone(patch.secondary_phone);
+          if (patch.whatsapp) patch.whatsapp_norm = normalizePhone(patch.whatsapp);
+          const cols = Object.keys(patch);
+          if (cols.length) await run(db, `UPDATE owners SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...cols.map((k) => patch[k]), r.duplicate_owner_id]);
+          extras('owner', r.duplicate_owner_id, r);
           counts.updated_owners++;
+        } else fresh.push(r);
+      }
+      const ids = await insertMany(db, 'owners', OWNER_COLS, fresh.map((r) => ownerRow(r, user, r.data.status ?? 'Active')), { returning: true });
+      fresh.forEach((r, i) => extras('owner', ids[i], r));
+      counts.created_owners += ids.length;
+    } else {
+      // Master data used by the sheet (a handful of lookups, cached)
+      const developers = new Map<string, number>();
+      const projects = new Map<string, { id: number; developer_id: number | null; location: string | null }>();
+      for (const r of rows) {
+        const devName = r.data.developer ? String(r.data.developer) : null;
+        if (devName && !developers.has(devName.toLowerCase())) developers.set(devName.toLowerCase(), await ensureDeveloper(db, devName));
+        const projName = r.data.project ? String(r.data.project) : null;
+        if (projName && !projects.has(projName.toLowerCase())) {
+          const p = await ensureProject(db, projName, devName ? developers.get(devName.toLowerCase())! : null);
+          const loc = await get<{ location: string | null }>(db, 'SELECT location FROM projects WHERE id = ?', [p.id]);
+          projects.set(projName.toLowerCase(), { ...p, location: loc?.location ?? null });
+        }
+      }
+
+      // Owners: link existing ones, create each new owner once (rows sharing a phone share an owner)
+      const newOwnerKeys: string[] = [];
+      const newOwnerSet = new Set<string>();
+      const newOwnerRows: unknown[][] = [];
+      const fills = new Map<number, { name_ar: string | null; address: string | null }>();
+      const rowOwnerKey = new Map<RowResult, string>();
+      for (const r of rows) {
+        if (r.owner_match_id) {
+          counts.linked_owners++;
+          if ((r.data.owner_name_ar || r.data.owner_address) && !fills.has(r.owner_match_id)) {
+            fills.set(r.owner_match_id, { name_ar: r.data.owner_name_ar ?? null, address: r.data.owner_address ?? null });
+          }
           continue;
         }
-        const id = insertOwner(db, user, {
-          name: r.data.owner_name,
-          primary_phone: r.data.primary_phone ?? r.data.whatsapp ?? null,
-          secondary_phone: r.data.secondary_phone ?? null,
-          whatsapp: r.data.whatsapp ?? null,
-          email: r.data.owner_email ?? null,
-          name_ar: r.data.owner_name_ar ?? null,
-          address: r.data.owner_address ?? null,
-          source: r.data.source ?? 'Import',
-          assigned_user_id: r.data.assigned_user_id ?? null,
-          status: r.data.status ?? 'Active',
-        });
-        counts.created_owners++;
-        addNoteAndTags('owner', id, r);
-        continue;
-      }
-
-      // Inventory
-      const developerId = r.data.developer ? ensureDeveloper(db, r.data.developer) : null;
-      const project = r.data.project ? ensureProject(db, r.data.project, developerId) : null;
-      const ownerId = resolveOwner(r);
-      const unitData: Record<string, any> = {};
-      for (const k of UNIT_KEYS) if (r.data[k] !== undefined) unitData[k] = r.data[k];
-      unitData.project_id = project?.id ?? null;
-      unitData.developer_id = project?.developer_id ?? developerId;
-      if (ownerId) unitData.owner_id = ownerId;
-      if (!unitData.source) unitData.source = 'Import';
-      // Imported units stay unassigned unless the sheet names an agent; assign them in bulk later.
-      if (unitData.assigned_user_id === undefined) unitData.assigned_user_id = null;
-      if (!unitData.location && project) unitData.location = get<{ location: string | null }>(db, 'SELECT location FROM projects WHERE id = ?', [project.id])?.location ?? null;
-
-      if (r.status === 'duplicate' && policy === 'update' && r.duplicate_unit_id) {
-        const keys = Object.keys(unitData).filter((k) => unitData[k] !== null && unitData[k] !== undefined && k !== 'source');
-        if (keys.includes('unit_number')) unitData.unit_number_norm = normalizeUnitNumber(unitData.unit_number);
-        const setKeys = keys.includes('unit_number') ? [...keys, 'unit_number_norm'] : keys;
-        if (setKeys.length) {
-          run(db, `UPDATE units SET ${setKeys.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...setKeys.map((k) => unitData[k]), r.duplicate_unit_id]);
+        if (!r.data.owner_name && !r.data.primary_phone) continue;
+        const key = r.owner_key ?? `row:${r.row}`;
+        rowOwnerKey.set(r, key);
+        if (!newOwnerSet.has(key)) {
+          newOwnerSet.add(key);
+          newOwnerKeys.push(key);
+          newOwnerRows.push(ownerRow(r, user, 'Active'));
         }
-        addNoteAndTags('unit', r.duplicate_unit_id, r);
-        counts.updated_units++;
-        continue;
       }
-      const id = insertUnit(db, user, unitData);
-      addNoteAndTags('unit', id, r);
-      counts.created_units++;
+      const ownerIds = await insertMany(db, 'owners', OWNER_COLS, newOwnerRows, { returning: true });
+      const ownerByKey = new Map(newOwnerKeys.map((k, i) => [k, ownerIds[i]]));
+      counts.created_owners += ownerIds.length;
+      // Fill in details existing owners are missing, never overwrite
+      for (const [id, f] of fills) {
+        await run(db, 'UPDATE owners SET name_ar = COALESCE(name_ar, ?), address = COALESCE(address, ?) WHERE id = ?', [f.name_ar, f.address, id]);
+      }
+
+      // Units
+      const inserts: { r: RowResult; values: unknown[] }[] = [];
+      for (const r of rows) {
+        const project = r.data.project ? projects.get(String(r.data.project).toLowerCase()) ?? null : null;
+        const developerId = project?.developer_id ?? (r.data.developer ? developers.get(String(r.data.developer).toLowerCase()) ?? null : null);
+        const ownerId = r.owner_match_id ?? (rowOwnerKey.has(r) ? ownerByKey.get(rowOwnerKey.get(r)!) ?? null : null);
+        const unitData: Record<string, any> = {};
+        for (const k of UNIT_KEYS) if (r.data[k] !== undefined) unitData[k] = r.data[k];
+        if (r.status === 'duplicate' && policy === 'update' && r.duplicate_unit_id) {
+          const patch: Record<string, any> = { ...unitData, project_id: project?.id ?? null, developer_id: developerId };
+          if (ownerId) patch.owner_id = ownerId;
+          if (patch.unit_number) patch.unit_number_norm = normalizeUnitNumber(patch.unit_number);
+          const keys = Object.keys(patch).filter((k) => patch[k] !== null && patch[k] !== undefined && k !== 'source');
+          if (keys.length) await run(db, `UPDATE units SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, [...keys.map((k) => patch[k]), r.duplicate_unit_id]);
+          extras('unit', r.duplicate_unit_id, r);
+          counts.updated_units++;
+          continue;
+        }
+        const values: Record<string, unknown> = {
+          ...unitData,
+          owner_id: ownerId,
+          project_id: project?.id ?? null,
+          developer_id: developerId,
+          status: unitData.status ?? 'Available',
+          // Imported units stay unassigned unless the sheet names an agent; assign them in bulk later.
+          assigned_user_id: unitData.assigned_user_id ?? null,
+          source: unitData.source ?? 'Import',
+          location: unitData.location ?? project?.location ?? null,
+          unit_number_norm: normalizeUnitNumber(unitData.unit_number),
+          created_by: user.id,
+        };
+        inserts.push({ r, values: UNIT_COLS.map((c) => values[c] ?? null) });
+      }
+      const unitIds = await insertMany(db, 'units', UNIT_COLS, inserts.map((x) => x.values), { returning: true });
+      inserts.forEach((x, i) => extras('unit', unitIds[i], x.r));
+      counts.created_units += unitIds.length;
     }
 
-    run(db, "UPDATE imports SET status = 'completed', result = ?, completed_at = datetime('now'), rows = '[]' WHERE id = ?", [JSON.stringify(counts), importId]);
+    await insertMany(db, 'notes', ['entity_type', 'entity_id', 'content', 'author_id'], notes);
+    await insertMany(db, 'taggings', ['tag_id', 'entity_type', 'entity_id'], taggings, { onConflictDoNothing: true });
+
+    await run(db, "UPDATE imports SET status = 'completed', result = ?, completed_at = datetime('now'), rows = '[]' WHERE id = ?", [JSON.stringify(counts), importId]);
     const parts = [
       counts.created_units && `${counts.created_units} units created`,
       counts.updated_units && `${counts.updated_units} units updated`,
@@ -558,7 +610,7 @@ export function executeImport(db: DB, user: AuthUser, importId: number, kind: Im
       counts.skipped && `${counts.skipped} duplicates skipped`,
       counts.errors && `${counts.errors} rows with errors skipped`,
     ].filter(Boolean);
-    logActivity(db, {
+    await logActivity(db, {
       userId: user.id,
       action: 'import_completed',
       entityType: 'import',
@@ -566,7 +618,7 @@ export function executeImport(db: DB, user: AuthUser, importId: number, kind: Im
       label: filename,
       message: `imported ${filename}: ${parts.join(', ') || 'no changes'}`,
     });
-    run(db, 'INSERT INTO notifications (user_id, type, message, link) VALUES (?, ?, ?, ?)', [user.id, 'import', `Import of ${filename} completed – ${parts.join(', ') || 'no changes'}`, '/imports']);
+    await run(db, 'INSERT INTO notifications (user_id, type, message, link) VALUES (?, ?, ?, ?)', [user.id, 'import', `Import of ${filename} completed – ${parts.join(', ') || 'no changes'}`, '/imports']);
   });
   return counts;
 }

@@ -10,7 +10,7 @@
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "NODE_ENV=production node --env-file-if-exists=.env --disable-warning=ExperimentalWarning dist-server/server/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "reset": "tsx server/reset-cli.ts"
   },
@@ -18,6 +18,8 @@
     "node": ">=22.13"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@supabase/supabase-js": "^2.117.2",
     "cookie-parser": "^1.4.7",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
@@ -25,6 +27,7 @@
     "multer": "^2.4.0",
     "papaparse": "^5.7.0",
     "pdfkit": "^0.20.2",
+    "postgres": "^3.4.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4"

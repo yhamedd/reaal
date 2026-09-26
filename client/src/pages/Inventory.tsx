@@ -57,6 +57,8 @@ export interface UnitRow {
 const DEFAULT_COLUMNS = ['code', 'location', 'developer', 'project', 'phase', 'unit_number', 'property_type', 'owner_name', 'owner_phone', 'bua', 'land_area', 'bedrooms', 'bathrooms', 'finishing', 'delivery', 'asking_price', 'original_price', 'status', 'agent_name', 'last_verified', 'updated_at'];
 const OPTIONAL_COLUMNS = ['floors', 'furnished', 'view', 'paid_amount', 'remaining_amount', 'maintenance', 'source', 'tags', 'created_at'];
 const STORAGE_KEY = 'reaal.inventory.columns.v2';
+const PAGE_SIZE = 2000;
+const MAX_ROWS = 20000;
 
 function defaultColumnState(): ColumnState[] {
   return [
@@ -166,11 +168,23 @@ export function InventoryPage() {
     const id = ++seq.current;
     setLoading(true);
     try {
-      const r = await api.get<{ total: number; rows: UnitRow[] }>(`/api/units${qs({ filters: effectiveFilters, sort, limit: 20000 })}`);
+      // Pages keep each response well under hosting limits (4.5 MB on Vercel); the first page shows immediately.
+      const page = (offset: number) => api.get<{ total: number; rows: UnitRow[] }>(`/api/units${qs({ filters: effectiveFilters, sort, limit: PAGE_SIZE, offset })}`);
+      const first = await page(0);
       if (id !== seq.current) return;
-      setRows(r.rows);
-      setTotal(r.total);
-      setSelected((s) => new Set([...s].filter((x) => r.rows.some((row) => row.id === x))));
+      setRows(first.rows);
+      setTotal(first.total);
+      let all = first.rows;
+      const offsets: number[] = [];
+      for (let o = PAGE_SIZE; o < Math.min(first.total, MAX_ROWS); o += PAGE_SIZE) offsets.push(o);
+      for (let i = 0; i < offsets.length; i += 3) {
+        const pages = await Promise.all(offsets.slice(i, i + 3).map(page));
+        if (id !== seq.current) return;
+        all = all.concat(...pages.map((p) => p.rows));
+        setRows(all);
+      }
+      const ids = new Set(all.map((row) => row.id));
+      setSelected((s) => new Set([...s].filter((x) => ids.has(x))));
     } catch (e) {
       toast(errorMessage(e), 'error');
     } finally {
@@ -415,8 +429,16 @@ export function InventoryPage() {
       />
 
       <div className="dg-footer">
-        <span>{loading ? <Spinner /> : `${rows.length.toLocaleString()} of ${total.toLocaleString()} units`}</span>
-        {total > rows.length && <span style={{ color: 'var(--warn)' }}>Showing the first {rows.length.toLocaleString()} — refine filters to see the rest</span>}
+        <span>
+          {loading ? (
+            <>
+              <Spinner /> {rows.length > 0 && `Loading ${rows.length.toLocaleString()} of ${total.toLocaleString()} units…`}
+            </>
+          ) : (
+            `${rows.length.toLocaleString()} of ${total.toLocaleString()} units`
+          )}
+        </span>
+        {!loading && total > rows.length && <span style={{ color: 'var(--warn)' }}>Showing the first {rows.length.toLocaleString()} — refine filters to see the rest</span>}
         <span className="grow" />
         <span className="desktop-only">Click a cell to select · Enter or type to edit · Arrows to move · Shift+click or drag to select a range · Ctrl+C / Ctrl+V to copy & paste</span>
       </div>

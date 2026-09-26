@@ -7,10 +7,10 @@ import { notify, unitLabel } from './activity.js';
  * "potentially outdated" verification thresholds. Each level notifies once
  * until the unit is verified again.
  */
-export function runVerificationCheck(db: DB) {
-  const s = getSettings(db).verification;
+export async function runVerificationCheck(db: DB) {
+  const s = (await getSettings(db)).verification;
   if (!s.notify_agents) return 0;
-  const rows = all<any>(
+  const rows = await all<any>(
     db,
     `SELECT id, assigned_user_id, last_verified, verification_notified_level,
             CASE WHEN last_verified IS NULL THEN 99999 ELSE julianday('now') - julianday(last_verified) END AS age
@@ -22,8 +22,8 @@ export function runVerificationCheck(db: DB) {
     const level = r.age >= s.outdated_days ? 'outdated' : r.age >= s.attention_days ? 'attention' : null;
     if (!level || level === r.verification_notified_level) continue;
     if (r.verification_notified_level === 'outdated' && level === 'attention') continue;
-    const label = unitLabel(db, r.id);
-    notify(
+    const label = await unitLabel(db, r.id);
+    await notify(
       db,
       r.assigned_user_id,
       'verification',
@@ -32,24 +32,24 @@ export function runVerificationCheck(db: DB) {
         : `${label} needs verification (last verified ${Math.floor(r.age)} days ago)`,
       `/inventory/${r.id}`,
     );
-    run(db, 'UPDATE units SET verification_notified_level = ? WHERE id = ?', [level, r.id]);
+    await run(db, 'UPDATE units SET verification_notified_level = ? WHERE id = ?', [level, r.id]);
     sent++;
   }
   return sent;
 }
 
-export function cleanupExpired(db: DB) {
-  run(db, "DELETE FROM sessions WHERE expires_at < datetime('now')");
-  run(db, "DELETE FROM password_resets WHERE expires_at < datetime('now', '-7 days')");
-  run(db, "DELETE FROM imports WHERE status <> 'completed' AND created_at < datetime('now', '-7 days')");
-  run(db, "DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < datetime('now', '-90 days')");
+export async function cleanupExpired(db: DB) {
+  await run(db, "DELETE FROM sessions WHERE expires_at < datetime('now')");
+  await run(db, "DELETE FROM password_resets WHERE expires_at < datetime('now', '-7 days')");
+  await run(db, "DELETE FROM imports WHERE status <> 'completed' AND created_at < datetime('now', '-7 days')");
+  await run(db, "DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < datetime('now', '-90 days')");
 }
 
 export function startJobs(db: DB) {
-  const tick = () => {
+  const tick = async () => {
     try {
-      runVerificationCheck(db);
-      cleanupExpired(db);
+      await runVerificationCheck(db);
+      await cleanupExpired(db);
     } catch (e) {
       console.error('Background job failed', e);
     }

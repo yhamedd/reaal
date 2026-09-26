@@ -1,12 +1,11 @@
 import PDFDocument from 'pdfkit';
-import fs from 'node:fs';
 import type { Writable } from 'node:stream';
 import { formatMoney, formatNumber } from '../../shared/format.js';
 import type { AppSettings } from '../settings.js';
 import type { UnitForOffer } from './offerText.js';
 
 export interface PdfImage {
-  path: string;
+  data: Buffer | null;
   mime: string;
   category: string;
 }
@@ -22,13 +21,13 @@ export interface PdfOptions {
   agent: { name: string; phone?: string | null; email?: string | null };
   includeOwner: boolean;
   includePrice: boolean;
-  logoPath?: string | null;
+  logo?: Buffer | null;
 }
 
 const PAGE_MARGIN = 48;
 
 function isEmbeddable(img: PdfImage) {
-  return /^image\/(png|jpe?g)$/.test(img.mime) && fs.existsSync(img.path);
+  return /^image\/(png|jpe?g)$/.test(img.mime) && !!img.data;
 }
 
 export function renderOfferPdf(out: Writable, opts: PdfOptions) {
@@ -43,9 +42,9 @@ export function renderOfferPdf(out: Writable, opts: PdfOptions) {
     doc.save();
     doc.rect(0, 0, doc.page.width, 64).fill(accent);
     let x = PAGE_MARGIN;
-    if (opts.logoPath && fs.existsSync(opts.logoPath)) {
+    if (opts.logo) {
       try {
-        doc.image(opts.logoPath, x, 14, { height: 36 });
+        doc.image(opts.logo, x, 14, { height: 36 });
         x += 48;
       } catch {
         /* unsupported logo format */
@@ -90,7 +89,7 @@ export function renderOfferPdf(out: Writable, opts: PdfOptions) {
     if (images.length) {
       const h = 230;
       try {
-        doc.image(images[0].path, PAGE_MARGIN, doc.y, { fit: [width, h], align: 'center', valign: 'center' });
+        doc.image(images[0].data!, PAGE_MARGIN, doc.y, { fit: [width, h], align: 'center', valign: 'center' });
       } catch {
         /* corrupt image */
       }
@@ -155,7 +154,7 @@ export function renderOfferPdf(out: Writable, opts: PdfOptions) {
       const y = doc.y + 6;
       extra.forEach((img, i) => {
         try {
-          doc.image(img.path, PAGE_MARGIN + i * (thumbW + 8), y, { fit: [thumbW, 110], align: 'center', valign: 'center' });
+          doc.image(img.data!, PAGE_MARGIN + i * (thumbW + 8), y, { fit: [thumbW, 110], align: 'center', valign: 'center' });
         } catch {
           /* skip */
         }
@@ -185,7 +184,7 @@ export function renderOfferPdf(out: Writable, opts: PdfOptions) {
       doc.font('Helvetica-Bold').fontSize(16).fillColor('#111111').text(`${u.project ?? ''} – ${plan.category === 'floor_plan' ? 'Floor Plan' : 'Master Plan'}`, { width });
       doc.moveDown(0.5);
       try {
-        doc.image(plan.path, PAGE_MARGIN, doc.y, { fit: [width, doc.page.height - doc.y - PAGE_MARGIN - 40], align: 'center', valign: 'center' });
+        doc.image(plan.data!, PAGE_MARGIN, doc.y, { fit: [width, doc.page.height - doc.y - PAGE_MARGIN - 40], align: 'center', valign: 'center' });
       } catch {
         /* skip */
       }

@@ -5,24 +5,24 @@ import { getSettings } from '../settings.js';
 
 export const dashboardRouter = Router();
 
-dashboardRouter.get('/', requireAuth, (req, res) => {
+dashboardRouter.get('/', requireAuth, async (req, res) => {
   const db = req.db;
-  const s = getSettings(db).verification;
-  const n = (sql: string, p: any[] = []) => get<{ n: number }>(db, sql, p)!.n;
+  const s = (await getSettings(db)).verification;
+  const n = async (sql: string, p: any[] = []) => (await get<{ n: number }>(db, sql, p))!.n;
   const inv = can(req.user, 'inventory.view');
   const kpis = {
-    total_units: inv ? n("SELECT COUNT(*) AS n FROM units WHERE archived_at IS NULL AND status <> 'Archived'") : null,
-    available_units: inv ? n("SELECT COUNT(*) AS n FROM units WHERE status = 'Available' AND archived_at IS NULL") : null,
-    reserved_units: inv ? n("SELECT COUNT(*) AS n FROM units WHERE status = 'Reserved' AND archived_at IS NULL") : null,
-    sold_units: inv ? n("SELECT COUNT(*) AS n FROM units WHERE status = 'Sold' AND archived_at IS NULL") : null,
-    total_owners: can(req.user, 'owners.view') ? n("SELECT COUNT(*) AS n FROM owners WHERE status <> 'Archived'") : null,
+    total_units: inv ? await n("SELECT COUNT(*) AS n FROM units WHERE archived_at IS NULL AND status <> 'Archived'") : null,
+    available_units: inv ? await n("SELECT COUNT(*) AS n FROM units WHERE status = 'Available' AND archived_at IS NULL") : null,
+    reserved_units: inv ? await n("SELECT COUNT(*) AS n FROM units WHERE status = 'Reserved' AND archived_at IS NULL") : null,
+    sold_units: inv ? await n("SELECT COUNT(*) AS n FROM units WHERE status = 'Sold' AND archived_at IS NULL") : null,
+    total_owners: can(req.user, 'owners.view') ? await n("SELECT COUNT(*) AS n FROM owners WHERE status <> 'Archived'") : null,
     active_requirements: can(req.user, 'requirements.view')
-      ? n("SELECT COUNT(*) AS n FROM requirements WHERE status IN ('Active', 'Contacted') AND archived_at IS NULL")
+      ? await n("SELECT COUNT(*) AS n FROM requirements WHERE status IN ('Active', 'Contacted') AND archived_at IS NULL")
       : null,
-    offers_created: can(req.user, 'offers.view_all') ? n('SELECT COUNT(*) AS n FROM offers') : n('SELECT COUNT(*) AS n FROM offers WHERE created_by = ?', [req.user!.id]),
-    units_this_week: inv ? n("SELECT COUNT(*) AS n FROM units WHERE created_at >= datetime('now', '-7 days')") : null,
+    offers_created: can(req.user, 'offers.view_all') ? await n('SELECT COUNT(*) AS n FROM offers') : await n('SELECT COUNT(*) AS n FROM offers WHERE created_by = ?', [req.user!.id]),
+    units_this_week: inv ? await n("SELECT COUNT(*) AS n FROM units WHERE created_at >= datetime('now', '-7 days')") : null,
     needs_verification: inv
-      ? n(
+      ? await n(
           `SELECT COUNT(*) AS n FROM units WHERE archived_at IS NULL AND status IN ('Available', 'Reserved', 'Pending Verification')
              AND (last_verified IS NULL OR julianday('now') - julianday(last_verified) >= ?)`,
           [s.attention_days],
@@ -30,7 +30,7 @@ dashboardRouter.get('/', requireAuth, (req, res) => {
       : null,
   };
   const teamWide = can(req.user, 'activity.view');
-  const activity = all<any>(
+  const activity = await all<any>(
     db,
     `SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id
       ${teamWide ? '' : 'WHERE a.user_id = ?'}
@@ -38,7 +38,7 @@ dashboardRouter.get('/', requireAuth, (req, res) => {
     teamWide ? [] : [req.user!.id],
   );
   const myUnitsToVerify = inv
-    ? all<any>(
+    ? await all<any>(
         db,
         `SELECT u.id, u.unit_number, u.last_verified, u.status, p.name AS project FROM units u LEFT JOIN projects p ON p.id = u.project_id
           WHERE u.assigned_user_id = ? AND u.archived_at IS NULL AND u.status IN ('Available', 'Reserved', 'Pending Verification')
@@ -48,7 +48,7 @@ dashboardRouter.get('/', requireAuth, (req, res) => {
       )
     : [];
   const byProject = inv
-    ? all<any>(
+    ? await all<any>(
         db,
         `SELECT p.id, p.name, COUNT(*) AS n FROM units u JOIN projects p ON p.id = u.project_id
           WHERE u.status = 'Available' AND u.archived_at IS NULL GROUP BY p.id ORDER BY n DESC LIMIT 8`,

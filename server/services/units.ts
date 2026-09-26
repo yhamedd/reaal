@@ -106,15 +106,15 @@ export function buildUnitWhere(
     const q = f.q.trim();
     const like = `%${likeEscape(q)}%`;
     const parts = [
-      "p.name LIKE ? ESCAPE '\\'",
-      "d.name LIKE ? ESCAPE '\\'",
-      "u.unit_number LIKE ? ESCAPE '\\'",
-      "u.phase LIKE ? ESCAPE '\\'",
-      "u.property_type LIKE ? ESCAPE '\\'",
-      "o.name LIKE ? ESCAPE '\\'",
-      "o.name_ar LIKE ? ESCAPE '\\'",
-      "a.name LIKE ? ESCAPE '\\'",
-      "u.location LIKE ? ESCAPE '\\'",
+      "p.name ILIKE ? ESCAPE '\\'",
+      "d.name ILIKE ? ESCAPE '\\'",
+      "u.unit_number ILIKE ? ESCAPE '\\'",
+      "u.phase ILIKE ? ESCAPE '\\'",
+      "u.property_type ILIKE ? ESCAPE '\\'",
+      "o.name ILIKE ? ESCAPE '\\'",
+      "o.name_ar ILIKE ? ESCAPE '\\'",
+      "a.name ILIKE ? ESCAPE '\\'",
+      "u.location ILIKE ? ESCAPE '\\'",
     ];
     params.push(like, like, like, like, like, like, like, like, like);
     // "Mivida A12" should match project + unit number
@@ -123,18 +123,18 @@ export function buildUnitWhere(
       const wordClauses = words.map((w) => {
         const wl = `%${likeEscape(w)}%`;
         params.push(wl, wl, wl, wl, wl);
-        return "(p.name LIKE ? ESCAPE '\\' OR u.unit_number LIKE ? ESCAPE '\\' OR u.phase LIKE ? ESCAPE '\\' OR u.property_type LIKE ? ESCAPE '\\' OR o.name LIKE ? ESCAPE '\\')";
+        return "(p.name ILIKE ? ESCAPE '\\' OR u.unit_number ILIKE ? ESCAPE '\\' OR u.phase ILIKE ? ESCAPE '\\' OR u.property_type ILIKE ? ESCAPE '\\' OR o.name ILIKE ? ESCAPE '\\')";
       });
       parts.push(`(${wordClauses.join(' AND ')})`);
     }
     const unitNo = normalizeUnitNumber(q);
     if (unitNo) {
-      parts.push("u.unit_number_norm LIKE ? ESCAPE '\\'");
+      parts.push("u.unit_number_norm ILIKE ? ESCAPE '\\'");
       params.push(`%${likeEscape(unitNo)}%`);
     }
     const phone = normalizePhone(q);
     if (phone.length >= 4 && /^[\d\s+()-]+$/.test(q)) {
-      parts.push("o.primary_phone_norm LIKE ? OR o.secondary_phone_norm LIKE ? OR o.whatsapp_norm LIKE ?");
+      parts.push("o.primary_phone_norm ILIKE ? OR o.secondary_phone_norm ILIKE ? OR o.whatsapp_norm ILIKE ?");
       params.push(`%${phone}%`, `%${phone}%`, `%${phone}%`);
     }
     const code = q.match(/^u-?0*(\d+)$/i);
@@ -170,11 +170,11 @@ export function buildUnitWhere(
   range('u.bua', f.bua_min, f.bua_max);
   range('u.land_area', f.land_min, f.land_max);
   if (f.phase?.trim()) {
-    clauses.push("u.phase LIKE ? ESCAPE '\\'");
+    clauses.push("u.phase ILIKE ? ESCAPE '\\'");
     params.push(`%${likeEscape(f.phase.trim())}%`);
   }
   if (f.delivery?.trim()) {
-    clauses.push("u.delivery LIKE ? ESCAPE '\\'");
+    clauses.push("u.delivery ILIKE ? ESCAPE '\\'");
     params.push(`%${likeEscape(f.delivery.trim())}%`);
   }
   if (f.verification?.length) {
@@ -192,7 +192,7 @@ export function buildUnitWhere(
     params.push(f.updated_from);
   }
   if (f.updated_to) {
-    clauses.push('u.updated_at < date(?, \'+1 day\')');
+    clauses.push('u.updated_at < datetime(?, \'+1 day\')');
     params.push(f.updated_to);
   }
   if (f.created_from) {
@@ -241,18 +241,18 @@ export function parseSort(raw: unknown): SortSpec[] {
   }
 }
 
-export function getUnitRow(db: DB, id: number) {
-  return get<any>(db, `${UNIT_SELECT} WHERE u.id = ?`, [id]);
+export async function getUnitRow(db: DB, id: number) {
+  return await get<any>(db, `${UNIT_SELECT} WHERE u.id = ?`, [id]);
 }
 
-export function findUnitDuplicates(
+export async function findUnitDuplicates(
   db: DB,
   { project_id, unit_number, phase }: { project_id?: number | null; unit_number?: string | null; phase?: string | null },
   excludeId?: number,
 ) {
   const norm = normalizeUnitNumber(unit_number);
   if (!project_id || !norm) return [];
-  const rows = all<any>(
+  const rows = await all<any>(
     db,
     `${UNIT_SELECT} WHERE u.project_id = ? AND u.unit_number_norm = ? AND u.id <> ? AND u.archived_at IS NULL`,
     [project_id, norm, excludeId ?? 0],

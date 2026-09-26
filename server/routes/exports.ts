@@ -56,10 +56,10 @@ async function send(res: Response, format: string, name: string, columns: Export
   res.send(buf);
 }
 
-function logExport(req: Express.Request, entity: string, count: number, scope: string, format: string) {
-  const threshold = getSettings(req.db).general.export_log_threshold;
+async function logExport(req: Express.Request, entity: string, count: number, scope: string, format: string) {
+  const threshold = (await getSettings(req.db)).general.export_log_threshold;
   if (count < threshold) return;
-  logActivity(req.db, {
+  await logActivity(req.db, {
     userId: req.user!.id,
     action: 'exported',
     entityType: entity,
@@ -74,17 +74,17 @@ exportsRouter.get('/units', requirePermission('inventory.view', 'inventory.expor
   let rows: any[];
   let scope: string;
   if (ids.length) {
-    rows = queryUnits(req.db, req.user!, { include_archived: true }, req.query.sort, 50000).rows.filter((r) => ids.includes(r.id));
+    rows = (await queryUnits(req.db, req.user!, { include_archived: true }, req.query.sort, 50000)).rows.filter((r) => ids.includes(r.id));
     scope = 'selected rows';
   } else {
     const filters = req.query.filters ? String(req.query.filters) : '';
-    rows = queryUnits(req.db, req.user!, filters || {}, req.query.sort, 50000).rows;
+    rows = (await queryUnits(req.db, req.user!, filters || {}, req.query.sort, 50000)).rows;
     scope = filters && filters !== '{}' ? 'filtered inventory' : 'entire inventory';
   }
   const wanted = String(req.query.columns ?? '').split(',').filter(Boolean);
   const columns = wanted.length ? UNIT_EXPORT_COLUMNS.filter((c) => wanted.includes(c.key) || c.key === 'code') : UNIT_EXPORT_COLUMNS;
   const out = rows.map((r) => ({ ...r, tag_names: (r.tags ?? []).map((t: any) => t.name).join(', ') }));
-  logExport(req, 'inventory', out.length, scope, format);
+  await logExport(req, 'inventory', out.length, scope, format);
   await send(res, format, 'inventory', columns, out);
 });
 
@@ -92,15 +92,15 @@ exportsRouter.get('/owners', requirePermission('owners.view', 'owners.export'), 
   const format = req.query.format === 'csv' ? 'csv' : 'xlsx';
   const contact = can(req.user, 'owners.contact');
   const ids = idList(req.query.ids);
-  const rows = all<any>(
+  const rows = (await all<any>(
     req.db,
     `SELECT o.*, a.name AS agent_name, (SELECT COUNT(*) FROM units u WHERE u.owner_id = o.id AND u.archived_at IS NULL) AS unit_count,
-            (SELECT group_concat(t.name, ', ') FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE tg.entity_type = 'owner' AND tg.entity_id = o.id) AS tag_names
+            (SELECT string_agg(t.name, ', ') FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE tg.entity_type = 'owner' AND tg.entity_id = o.id) AS tag_names
        FROM owners o LEFT JOIN users a ON a.id = o.assigned_user_id
       ${ids.length ? `WHERE o.id IN (${ids.map(() => '?').join(',')})` : req.query.include_archived === '1' ? '' : "WHERE o.status <> 'Archived'"}
       ORDER BY o.name COLLATE NOCASE`,
     ids,
-  ).map((o) => ({
+  )).map((o) => ({
     ...o,
     code: ownerCode(o.id),
     primary_phone: contact ? o.primary_phone : maskPhone(o.primary_phone),
@@ -124,20 +124,20 @@ exportsRouter.get('/owners', requirePermission('owners.view', 'owners.export'), 
     { key: 'created_at', header: 'Created', width: 18 },
     { key: 'updated_at', header: 'Last Updated', width: 18 },
   ];
-  logExport(req, 'owner', rows.length, ids.length ? 'selected rows' : 'owner database', format);
+  await logExport(req, 'owner', rows.length, ids.length ? 'selected rows' : 'owner database', format);
   await send(res, format, 'owners', columns, rows);
 });
 
 exportsRouter.get('/requirements', requirePermission('requirements.view', 'requirements.export'), async (req, res) => {
   const format = req.query.format === 'csv' ? 'csv' : 'xlsx';
   const contact = can(req.user, 'owners.contact');
-  const projects = new Map(all<any>(req.db, 'SELECT id, name FROM projects').map((p) => [p.id, p.name]));
-  const rows = all<any>(
+  const projects = new Map((await all<any>(req.db, 'SELECT id, name FROM projects')).map((p) => [p.id, p.name]));
+  const rows = (await all<any>(
     req.db,
     `SELECT r.*, a.name AS agent_name, d.name AS developer FROM requirements r
        LEFT JOIN users a ON a.id = r.assigned_user_id LEFT JOIN developers d ON d.id = r.developer_id
       WHERE r.archived_at IS NULL ORDER BY r.created_at DESC`,
-  ).map((r) => ({
+  )).map((r) => ({
     ...r,
     code: requirementCode(r.id),
     phone: contact ? r.phone : maskPhone(r.phone),
@@ -165,7 +165,7 @@ exportsRouter.get('/requirements', requirePermission('requirements.view', 'requi
     { key: 'status', header: 'Status' },
     { key: 'created_at', header: 'Created', width: 18 },
   ];
-  logExport(req, 'request', rows.length, 'requests', format);
+  await logExport(req, 'request', rows.length, 'requests', format);
   await send(res, format, 'requests', columns, rows);
 });
 

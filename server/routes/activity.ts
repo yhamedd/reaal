@@ -10,7 +10,7 @@ export const activityRouter = Router();
  * Two modes: record history (entity_type + entity_id) is visible to anyone who
  * can view that record; the full team log requires activity.view.
  */
-activityRouter.get('/', requireAuth, (req, res) => {
+activityRouter.get('/', requireAuth, async (req, res) => {
   const db = req.db;
   const clauses: string[] = [];
   const params: any[] = [];
@@ -50,7 +50,7 @@ activityRouter.get('/', requireAuth, (req, res) => {
   const q = String(req.query.q ?? '').trim();
   if (q) {
     const like = `%${likeEscape(q)}%`;
-    clauses.push("(a.message LIKE ? ESCAPE '\\' OR a.entity_label LIKE ? ESCAPE '\\' OR a.old_value LIKE ? ESCAPE '\\' OR a.new_value LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\')");
+    clauses.push("(a.message ILIKE ? ESCAPE '\\' OR a.entity_label ILIKE ? ESCAPE '\\' OR a.old_value ILIKE ? ESCAPE '\\' OR a.new_value ILIKE ? ESCAPE '\\' OR u.name ILIKE ? ESCAPE '\\')");
     params.push(like, like, like, like, like);
   }
   if (req.query.from) {
@@ -58,14 +58,14 @@ activityRouter.get('/', requireAuth, (req, res) => {
     params.push(String(req.query.from));
   }
   if (req.query.to) {
-    clauses.push("a.created_at < date(?, '+1 day')");
+    clauses.push("a.created_at < datetime(?, '+1 day')");
     params.push(String(req.query.to));
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const limit = Math.min(Number(req.query.limit) || 100, 500);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
-  const total = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM activity a LEFT JOIN users u ON u.id = a.user_id ${where}`, params)!.n;
-  const rows = all<any>(
+  const total = (await get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM activity a LEFT JOIN users u ON u.id = a.user_id ${where}`, params))!.n;
+  const rows = await all<any>(
     db,
     `SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id ${where}
       ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?`,
@@ -74,6 +74,6 @@ activityRouter.get('/', requireAuth, (req, res) => {
   res.json({ total, rows });
 });
 
-activityRouter.get('/actions', requireAuth, (req, res) => {
-  res.json(all<{ action: string }>(req.db, 'SELECT DISTINCT action FROM activity ORDER BY action').map((r) => r.action));
+activityRouter.get('/actions', requireAuth, async (req, res) => {
+  res.json((await all<{ action: string }>(req.db, 'SELECT DISTINCT action FROM activity ORDER BY action')).map((r) => r.action));
 });

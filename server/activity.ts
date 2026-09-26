@@ -20,8 +20,8 @@ function str(v: unknown): string | null {
   return String(v);
 }
 
-export function logActivity(db: DB, a: ActivityInput) {
-  run(
+export async function logActivity(db: DB, a: ActivityInput) {
+  await run(
     db,
     `INSERT INTO activity (user_id, action, entity_type, entity_id, entity_label, field, old_value, new_value, message)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -52,7 +52,7 @@ function display(meta: FieldMeta, v: unknown): string {
 }
 
 /** Writes one activity row per changed field, e.g. "changed Mivida A12 asking price from 40,000,000 to 42,000,000". */
-export function logChanges(
+export async function logChanges(
   db: DB,
   user: AuthUser,
   entityType: string,
@@ -70,7 +70,7 @@ export function logChanges(
     if (String(a ?? '') === String(b ?? '')) continue;
     changed.push(key);
     const isStatus = key === 'status';
-    logActivity(db, {
+    await logActivity(db, {
       userId: user.id,
       action: isStatus ? 'status_changed' : 'updated',
       entityType,
@@ -87,29 +87,29 @@ export function logChanges(
   return changed;
 }
 
-export function notify(db: DB, userId: number | null | undefined, type: string, message: string, link?: string) {
+export async function notify(db: DB, userId: number | null | undefined, type: string, message: string, link?: string) {
   if (!userId) return;
-  run(db, 'INSERT INTO notifications (user_id, type, message, link) VALUES (?, ?, ?, ?)', [userId, type, message, link ?? null]);
+  await run(db, 'INSERT INTO notifications (user_id, type, message, link) VALUES (?, ?, ?, ?)', [userId, type, message, link ?? null]);
 }
 
 /** Notifies every active user holding a permission, except the actor. */
-export function notifyPermission(db: DB, permission: string, type: string, message: string, link?: string, exceptUserId?: number) {
-  const users = all<{ id: number; permissions: string }>(
+export async function notifyPermission(db: DB, permission: string, type: string, message: string, link?: string, exceptUserId?: number) {
+  const users = await all<{ id: number; permissions: string }>(
     db,
     `SELECT u.id, r.permissions FROM users u JOIN roles r ON r.id = u.role_id WHERE u.status = 'active'`,
   );
   for (const u of users) {
     if (u.id === exceptUserId) continue;
     try {
-      if ((JSON.parse(u.permissions) as string[]).includes(permission)) notify(db, u.id, type, message, link);
+      if ((JSON.parse(u.permissions) as string[]).includes(permission)) await notify(db, u.id, type, message, link);
     } catch {
       /* skip */
     }
   }
 }
 
-export function unitLabel(db: DB, unitId: number): string {
-  const row = get<any>(
+export async function unitLabel(db: DB, unitId: number): Promise<string> {
+  const row = await get<any>(
     db,
     `SELECT u.id, u.unit_number, p.name AS project FROM units u LEFT JOIN projects p ON p.id = u.project_id WHERE u.id = ?`,
     [unitId],
